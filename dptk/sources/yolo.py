@@ -1,10 +1,10 @@
+from typing import Iterable
+from ..context import FrameContext
+from ..sources.file import VideoSource
 from ultralytics import YOLO
 
-# from ..context import FrameContext
-from ..sources.file import VideoSource
 
-
-def YoloSource(video_path: str, model_path: str = "last.pt", conf: float = 0.25):
+def YoloSource(video_path: str, model_path: str = "last.pt", conf: float = 0.25) -> Iterable[FrameContext]:
     """
     A source that wraps VideoSource and injects YOLO inference results
     into the FrameContext metadata.

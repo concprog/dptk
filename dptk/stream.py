@@ -15,9 +15,15 @@ class Stream:
         def generator() -> Iterator[FrameContext]:
             for ctx in self.source:
                 processed_ctx = ctx
+                should_yield = True
                 for op in ops:
                     processed_ctx = op(processed_ctx)
-                yield processed_ctx
+                    if processed_ctx is None:
+                        should_yield = False
+                        break
+                
+                if should_yield:
+                    yield processed_ctx
 
         return Stream(generator())
 

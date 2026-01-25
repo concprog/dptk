@@ -27,7 +27,7 @@ This is a summary of the `dptk` codebase, a Python-based toolkit for building fl
     │   └───yolo.py
     └───transforms/
         ├───__init__.py
-        ├───image_ops.py
+        ├───ops.py
         ├───uie.py
         └───yolo.py
 ```
@@ -75,6 +75,9 @@ class Stream:
 
         def generator() -> Iterator[FrameContext]:
             for ctx in self.source:
+                # If predicate is explicitly None, use standard Python truthiness filtering
+                # Since FrameContext is an object, 'if ctx' is always True.
+                # We explicitly check for None here to enable the "Functional Fail State".
                 if predicate is None:
                     if ctx is not None:
                         yield ctx
@@ -82,6 +85,10 @@ class Stream:
                     yield ctx
 
         return Stream(generator())
+
+    # Allow the Stream to be treated as an iterable directly
+    def __iter__(self):
+        return iter(self.source)
 ```
 
 #### `dptk/context.py`
@@ -139,10 +146,11 @@ Sources are the starting point of a data processing pipeline. They are responsib
 The `VideoSource` function reads a video file and yields a stream of `FrameContext` objects, one for each frame in the video.
 
 ```python
-from curses import meta
-import cv2
 from ..context import FrameContext
+
 import time
+import cv2
+from typing import Iterable
 
 def VideoSource(path: str) -> Iterable[FrameContext]:
     """
@@ -183,6 +191,7 @@ def YoloSource(video_path: str, model_path: str = "last.pt", conf: float = 0.25)
     A source that wraps VideoSource and injects YOLO inference results
     into the FrameContext metadata.
     """
+    print(f"Loading YOLO model from {model_path}...")
     model = YOLO(model_path)
     base_stream = VideoSource(video_path)
 

@@ -73,3 +73,50 @@ def crop_to_class(
         return ctx
 
     return wrapper
+
+def draw_boxes():
+    """
+    Draws bounding boxes from YOLO inference results onto the frame.
+    Includes labels, confidence, and tracking IDs if available.
+    """
+    def wrapper(ctx: FrameContext) -> FrameContext:
+        if "yolo" not in ctx.metadata:
+            return ctx
+            
+        # Ultralytics results are a list, we take the first one (single frame)
+        results = ctx.metadata["yolo"][0]
+        boxes = results.boxes
+
+        if boxes is not None:
+            for box in boxes:
+                # box.xyxy is a tensor, map to int
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                
+                # Get class info
+                cls_id = int(box.cls[0].item())
+                label = results.names[cls_id]
+                conf = float(box.conf[0].item())
+                
+                # Build label text
+                text_parts = [label, f"{conf:.2f}"]
+                
+                # Add track ID if present
+                if box.id is not None:
+                    track_id = int(box.id[0].item())
+                    text_parts.insert(0, f"#{track_id}")
+                    
+                text = " ".join(text_parts)
+                
+                # Draw box
+                cv2.rectangle(ctx.frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                
+                # Draw label background
+                (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                # Ensure label doesn't go off top of screen
+                y_label = max(y1, h + 5)
+                
+                cv2.rectangle(ctx.frame, (x1, y_label - h - 5), (x1 + w, y_label), (0, 255, 0), -1)
+                cv2.putText(ctx.frame, text, (x1, y_label - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+                
+        return ctx
+    return wrapper

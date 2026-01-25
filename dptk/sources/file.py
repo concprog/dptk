@@ -1,7 +1,8 @@
-from curses import meta
-import cv2
 from ..context import FrameContext
+
 import time
+import cv2
+from typing import Iterable
 
 def VideoSource(path: str) -> Iterable[FrameContext]:
     """
