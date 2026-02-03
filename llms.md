@@ -44,6 +44,12 @@ You can filter frames out of the stream using `.filter()`.
 -   **Explicit predicate**: `.filter(lambda ctx: ctx.index % 2 == 0)`
 -   **Implicit filtering**: If a transform returns `None`, the stream automatically drops that frame. This is the "Functional Fail State" pattern.
 
+```python
+# Keep only frames where 'person' was detected
+# (Assuming a previous YoloSource or transform populated metadata)
+filtered_stream = stream.filter(lambda ctx: "yolo" in ctx.metadata)
+```
+
 ## Transforms
 
 A **Transform** is any callable that accepts a `FrameContext` and returns a `FrameContext` (or `None`).
