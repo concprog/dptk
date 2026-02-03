@@ -1,8 +1,7 @@
 import cv2
 import numpy as np
 from ..context import FrameContext
-from ..decorators import frame_op
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Callable, Dict, Any
 
 # -----------------------------------------------------------------------------
 # Transform Helpers
@@ -24,18 +23,33 @@ def order_points(pts: np.ndarray) -> np.ndarray:
     
     return rect
 
-def four_point_transform(pts: np.ndarray, maxWidth: int | None = None, maxHeight: int | None = None):
+def four_point_transform(
+    pts: Optional[np.ndarray] = None, 
+    pts_key: Optional[str] = None,
+    maxWidth: Optional[int] = None, 
+    maxHeight: Optional[int] = None
+) -> Callable[[FrameContext], FrameContext]:
     """
     Applies a perspective transform to obtain a top-down view of the image region
     defined by the 4 points.
     
     Args:
         pts: List of 4 points [(x,y), ...].
+        pts_key: Metadata key to retrieve points from if pts is None.
+        maxWidth: Optional explicit width for output
+        maxHeight: Optional explicit height for output
     """
-    # This needs to be a closure that accepts the frame
-    @frame_op
-    def _op(frame: np.ndarray) -> np.ndarray:
-        rect = order_points(pts)
+    def wrapper(ctx: FrameContext) -> FrameContext:
+        points = pts
+        if points is None and pts_key is not None:
+             points = ctx.metadata.get(pts_key)
+             
+        if points is None:
+            return ctx
+            
+        points = np.array(points, dtype="float32") # Ensure array
+        
+        rect = order_points(points)
         (tl, tr, br, bl) = rect
         
         # Compute width of new image
@@ -59,46 +73,113 @@ def four_point_transform(pts: np.ndarray, maxWidth: int | None = None, maxHeight
             [0, h - 1]], dtype="float32")
             
         M = cv2.getPerspectiveTransform(rect, dst)
-        return cv2.warpPerspective(frame, M, (w, h))
-    return _op
+        ctx.frame = cv2.warpPerspective(ctx.frame, M, (w, h))
+        return ctx
+        
+    return wrapper
 
 
-def warp_perspective(src_pts: np.ndarray, dst_pts: np.ndarray, size: Tuple[int, int]):
+def warp_perspective(
+    src_pts: Optional[np.ndarray] = None, 
+    dst_pts: Optional[np.ndarray] = None, 
+    src_key: Optional[str] = None,
+    dst_key: Optional[str] = None,
+    size: Optional[Tuple[int, int]] = None
+) -> Callable[[FrameContext], FrameContext]:
     """
     General perspective warp given source and destination points.
     """
-    @frame_op
-    def _op(frame: np.ndarray) -> np.ndarray:
-        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-        return cv2.warpPerspective(frame, M, size)
-    return _op
+    def wrapper(ctx: FrameContext) -> FrameContext:
+        s_pts = src_pts
+        if s_pts is None and src_key:
+            s_pts = ctx.metadata.get(src_key)
+            
+        d_pts = dst_pts
+        if d_pts is None and dst_key:
+            d_pts = ctx.metadata.get(dst_key)
+            
+        if s_pts is None or d_pts is None:
+            return ctx
+            
+        s_pts = np.array(s_pts, dtype="float32")
+        d_pts = np.array(d_pts, dtype="float32")
+        
+        out_size = size
+        if out_size is None:
+            out_size = (ctx.frame.shape[1], ctx.frame.shape[0])
 
-def warp_affine(src_pts: np.ndarray, dst_pts: np.ndarray, size: Tuple[int, int]):
+        M = cv2.getPerspectiveTransform(s_pts, d_pts)
+        ctx.frame = cv2.warpPerspective(ctx.frame, M, out_size)
+        return ctx
+    return wrapper
+
+def warp_affine(
+    src_pts: Optional[np.ndarray] = None, 
+    dst_pts: Optional[np.ndarray] = None,
+    src_key: Optional[str] = None,
+    dst_key: Optional[str] = None,
+    size: Optional[Tuple[int, int]] = None
+) -> Callable[[FrameContext], FrameContext]:
     """
     Affine warp (3 points).
     """
-    @frame_op
-    def _op(frame: np.ndarray) -> np.ndarray:
-        M = cv2.getAffineTransform(src_pts, dst_pts)
-        return cv2.warpAffine(frame, M, size)
-    return _op
+    def wrapper(ctx: FrameContext) -> FrameContext:
+        s_pts = src_pts
+        if s_pts is None and src_key:
+            s_pts = ctx.metadata.get(src_key)
+            
+        d_pts = dst_pts
+        if d_pts is None and dst_key:
+            d_pts = ctx.metadata.get(dst_key)
+            
+        if s_pts is None or d_pts is None:
+            return ctx
 
-def apply_homography(src_pts: np.ndarray, dst_pts: np.ndarray, ransac_thresh: float = 5.0):
+        s_pts = np.array(s_pts, dtype="float32")
+        d_pts = np.array(d_pts, dtype="float32")
+
+        out_size = size
+        if out_size is None:
+             out_size = (ctx.frame.shape[1], ctx.frame.shape[0])
+
+        M = cv2.getAffineTransform(s_pts, d_pts)
+        ctx.frame = cv2.warpAffine(ctx.frame, M, out_size)
+        return ctx
+    return wrapper
+
+def apply_homography(
+    src_pts: Optional[np.ndarray] = None, 
+    dst_pts: Optional[np.ndarray] = None,
+    src_key: Optional[str] = None,
+    dst_key: Optional[str] = None,
+    ransac_thresh: float = 5.0
+) -> Callable[[FrameContext], FrameContext]:
     """
     Computes and applies homography matrix using RANSAC.
     Note: Requires sufficient points.
     """
-    @frame_op
-    def _op(frame: np.ndarray) -> np.ndarray:
-        # This usually transforms the 'src' image to match 'dst' perspective if we had two images.
-        # Here we just treat 'frame' as the source image to be warped.
-        # If dst_pts don't define a rectangular bounds, the output size might be arbitrary.
-        # We'll default to current frame size unless otherwise specified.
-        # But commonly Homography maps points -> points. 
-        # For image warping:
-        (h, w) = frame.shape[:2]
-        H, _ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, ransac_thresh)
+    def wrapper(ctx: FrameContext) -> FrameContext:
+        s_pts = src_pts
+        if s_pts is None and src_key:
+             s_pts = ctx.metadata.get(src_key)
+             
+        d_pts = dst_pts
+        if d_pts is None and dst_key:
+             d_pts = ctx.metadata.get(dst_key)
+        
+        if s_pts is None or d_pts is None:
+             return ctx
+             
+        # s_pts/d_pts might be list of points, need numpy
+        s_pts = np.array(s_pts)
+        d_pts = np.array(d_pts)
+        
+        (h, w) = ctx.frame.shape[:2]
+        H, _ = cv2.findHomography(s_pts, d_pts, cv2.RANSAC, ransac_thresh)
+        
         if H is None:
-            return frame
-        return cv2.warpPerspective(frame, H, (w, h))
-    return _op
+            return ctx
+            
+        ctx.frame = cv2.warpPerspective(ctx.frame, H, (w, h))
+        return ctx
+    return wrapper

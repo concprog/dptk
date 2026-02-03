@@ -54,8 +54,14 @@ def test_estimate_pose_skips_empty(ctx, calibration_data):
 def test_solve_pnp_random(ctx, calibration_data):
     cm, dc = calibration_data
     # Create random 3D points and correpsonding 2D points to force a solve
-    obj_points = np.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1]], dtype=np.float32)
-    img_points = np.array([[10,10], [20,10], [10,20], [15,15]], dtype=np.float32)
+    obj_points = np.array([
+        [0,0,0], [1,0,0], [0,1,0], [0,0,1],
+        [1,1,0], [0,1,1]
+    ], dtype=np.float32)
+    img_points = np.array([
+        [10,10], [20,10], [10,20], [15,15],
+        [20,20], [15,25]
+    ], dtype=np.float32)
     
     op = solve_pnp(obj_points, img_points, cm, dc, metadata_key="pnp_res")
     res = op(ctx)

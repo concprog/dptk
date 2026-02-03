@@ -8,11 +8,11 @@ from typing import Any, List, Optional, Dict
 # CALIBRATION
 # -----------------------------------------------------------------------------
 
-@frame_op
 def undistort(camera_matrix: np.ndarray, dist_coeffs: np.ndarray, new_camera_matrix: Optional[np.ndarray] = None):
     """
     Undistorts the frame using camera calibration parameters.
     """
+    @frame_op
     def _op(frame: np.ndarray) -> np.ndarray:
         h, w = frame.shape[:2]
         newcameramtx = new_camera_matrix

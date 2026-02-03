@@ -1,5 +1,5 @@
 
-import pytest
+import pytest  # pyright: ignore[reportMissingImports]
 import numpy as np
 import cv2
 from dptk.context import FrameContext
@@ -38,7 +38,9 @@ def test_translate(ctx):
     # Check if the square moved. Original center was (50, 50). New center should be roughly (60, 70)
     # The pixel at 50,50 should now be black (original was white)
     # The pixel at 60,70 should be white
-    assert np.all(res.frame[50, 50] == 0) 
+    # The pixel at 25,25 was white (top-left of square), should now be black (background)
+    assert np.all(res.frame[25, 25] == 0) 
+    # The pixel at 60,70 is inside the new square, should be white
     assert np.all(res.frame[70, 60] == 255)
 
 def test_rotate(ctx):
@@ -55,8 +57,9 @@ def test_rotate_bound(ctx):
     assert h > 100 and w > 100
 
 def test_canny(ctx):
-    op = canny(ctx, threshold1=50, threshold2=150)
-    res = op
+    # FIXED: call factory first
+    op = canny(threshold1=50, threshold2=150)
+    res = op(ctx)
     # Canny in ops.py returns BGR 3-channel
     assert res.frame.shape[2] == 3
     # Should detect edges of the square

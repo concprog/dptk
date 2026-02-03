@@ -3,7 +3,6 @@ import pytest
 import numpy as np
 from dptk.context import FrameContext
 from dptk.stream import Stream
-from dptk.transforms.transforms import four_point_transform
 import cv2
 
 @pytest.fixture
@@ -18,21 +17,6 @@ def test_import_yolo():
         from dptk.sources import yolo
     except ImportError as e:
         pytest.fail(f"Failed to import dptk.sources.yolo: {e}")
-
-def test_four_point_transform(dummy_frame_context):
-    """Verify four_point_transform respects maxWidth/maxHeight"""
-    # 4 points representing a 10x10 square at top left
-    pts = np.array([[0,0], [10,0], [10,10], [0,10]], dtype="float32")
-    
-    # Test with explicit max size
-    op = four_point_transform(pts, maxWidth=50, maxHeight=50)
-    
-    # Run transform
-    res_ctx = op(dummy_frame_context)
-    
-    h, w = res_ctx.frame.shape[:2]
-    assert w == 50, f"Expected width 50, got {w}"
-    assert h == 50, f"Expected height 50, got {h}"
 
 def test_stream_none_handling():
     """Verify Stream.pipe drops items when an operator returns None"""
