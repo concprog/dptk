@@ -2,66 +2,6 @@
 
 `dptk` is a lightweight, functional-style library for building video and perception processing pipelines. It emphasizes lazy evaluation, modularity, and a clear separation between data sources, transformations, and sinks.
 
-## Library structure:
-
-```
-dptk/
-├── __init__.py
-├── context.py          # Core FrameContext container
-├── stream.py           # Stream orchestration
-├── decorators.py       # @frame_op decorator
-├── sinks.py            # Sinks (display, write)
-├── sources/
-│   ├── __init__.py
-│   ├── file.py         # VideoSource
-│   └── yolo.py         # YoloSource
-└── transforms/
-    ├── __init__.py
-    ├── features.py     # Feature detection (ORB, SIFT, Matching)
-    ├── ops.py          # Basic CV ops (resize, rotate, contours)
-    ├── pose.py         # Pose & Calibration (ArUco, PnP, undistort)
-    ├── transforms.py   # Geometric transforms (warp, homography)
-    ├── uie.py          # Image enhancement (CLAHE, Gray World)
-    └── yolo.py         # YOLO utilities (crop_to_class, draw_boxes)
-```
-
-## Available Transforms:
-
-All transforms implement `Callable[[FrameContext], FrameContext]`.
-Many invoke the `@frame_op` decorator internally.
-
-### `dptk.transforms.ops` (Basic CV)
-- `resize(width, height)`: Resizes frame.
-- `rotate(angle)`: Rotates frame.
-- `canny(t1, t2)`: Edge detection.
-- `find_contours`, `draw_contours`, `analyze_contours`: Contour pipeline.
-
-### `dptk.transforms.transforms` (Geometric)
-- `four_point_transform(pts | pts_key)`: Perspective crop.
-- `warp_perspective(src | src_key, dst | dst_key)`: General wrap.
-- `warp_affine(src | src_key, dst | dst_key)`: Affine warp.
-- `apply_homography(src | src_key, dst | dst_key)`: RANSAC homography.
-
-### `dptk.transforms.pose` (3D/Calibration)
-- `undistort`: Lens correction.
-- `detect_aruco`, `draw_aruco`: Marker detection.
-- `solve_pnp`: 3D-2D pose estimation.
-- `project_points`: Project 3D points back to image.
-
-### `dptk.transforms.features` (Keypoints)
-- `detect_features(algorithm)`: ORB/SIFT/AKAZE.
-- `match_features(template)`: Feature matching.
-- `draw_keypoints`, `draw_matches`: Visualization.
-
-### `dptk.transforms.uie` (Enhancement)
-- `CLAHE`: Contrast enhancement.
-- `grayworld`: White balance.
-
-### `dptk.transforms.yolo` (YOLO utils)
-- `crop_to_class`: Crops detection regions.
-- `draw_boxes`: Visualizes detections.
-
-
 ## Core Concepts
 
 At the heart of `dptk` is the **FrameContext**, which acts as the atomic unit of data.
@@ -156,10 +96,69 @@ pipeline.subscribe(display("My Window"))
 for ctx in pipeline:
     print(f"Processed frame {ctx.index}")
 ```
+## Library structure:
+
+```
+dptk/
+├── __init__.py
+├── context.py          # Core FrameContext container
+├── stream.py           # Stream orchestration
+├── decorators.py       # @frame_op decorator
+├── sinks.py            # Sinks (display, write)
+├── sources/
+│   ├── __init__.py
+│   ├── file.py         # VideoSource
+│   └── yolo.py         # YoloSource
+└── transforms/
+    ├── __init__.py
+    ├── features.py     # Feature detection (ORB, SIFT, Matching)
+    ├── ops.py          # Basic CV ops (resize, rotate, contours)
+    ├── pose.py         # Pose & Calibration (ArUco, PnP, undistort)
+    ├── transforms.py   # Geometric transforms (warp, homography)
+    ├── uie.py          # Image enhancement (CLAHE, Gray World)
+    └── yolo.py         # YOLO utilities (crop_to_class, draw_boxes)
+```
+
+## Available Transforms:
+
+All transforms implement `Callable[[FrameContext], FrameContext]`.
+Many invoke the `@frame_op` decorator internally.
+
+### `dptk.transforms.ops` (Basic CV)
+- `resize(width, height)`: Resizes frame.
+- `rotate(angle)`: Rotates frame.
+- `canny(t1, t2)`: Edge detection.
+- `find_contours`, `draw_contours`, `analyze_contours`: Contour pipeline.
+
+### `dptk.transforms.transforms` (Geometric)
+- `four_point_transform(pts | pts_key)`: Perspective crop.
+- `warp_perspective(src | src_key, dst | dst_key)`: General wrap.
+- `warp_affine(src | src_key, dst | dst_key)`: Affine warp.
+- `apply_homography(src | src_key, dst | dst_key)`: RANSAC homography.
+
+### `dptk.transforms.pose` (3D/Calibration)
+- `undistort`: Lens correction.
+- `detect_aruco`, `draw_aruco`: Marker detection.
+- `solve_pnp`: 3D-2D pose estimation.
+- `project_points`: Project 3D points back to image.
+
+### `dptk.transforms.features` (Keypoints)
+- `detect_features(algorithm)`: ORB/SIFT/AKAZE.
+- `match_features(template)`: Feature matching.
+- `draw_keypoints`, `draw_matches`: Visualization.
+
+### `dptk.transforms.uie` (Enhancement)
+- `CLAHE`: Contrast enhancement.
+- `grayworld`: White balance.
+
+### `dptk.transforms.yolo` (YOLO utils)
+- `crop_to_class`: Crops detection regions.
+- `draw_boxes`: Visualizes detections.
 
 ## Summary
 
 1.  **Wrap** data in `FrameContext`.
 2.  **Create** a `Stream` from a source.
 3.  **Chain** operations using `.pipe()`.
-4.  **Execute** by attaching a Sink.
+4. **Filter** out unwanted frames using `.filter()`.
+5.  **Execute** by attaching a Sink.
