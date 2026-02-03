@@ -10,7 +10,7 @@ import cv2
 def dummy_frame_context():
     # Create dummy frame
     frame = np.zeros((100, 100, 3), dtype=np.uint8)
-    return FrameContext(frame=frame)
+    return FrameContext(frame=frame, index=0, timestamp=0.0)
 
 def test_import_yolo():
     """Verify dptk.sources.yolo can be imported (requires ultralytics)"""
@@ -44,7 +44,10 @@ def test_stream_none_handling():
         ctx.metadata['processed'] = True
         return ctx
         
-    source_data = [FrameContext(frame=np.zeros((10,10))), FrameContext(frame=np.zeros((10,10)))]
+    source_data = [
+        FrameContext(frame=np.zeros((10,10)), index=0, timestamp=0.0), 
+        FrameContext(frame=np.zeros((10,10)), index=1, timestamp=0.1)
+    ]
     stream = Stream(source_data)
     
     # Chain: pass -> none -> pass
