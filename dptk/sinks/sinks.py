@@ -1,6 +1,6 @@
 import cv2
 from typing import Callable, Iterable
-from .context import FrameContext
+from ..context import FrameContext
 
 def display(window_name: str = "Output") -> Callable[[Iterable[FrameContext]], None]:
     def consume(stream: Iterable[FrameContext]) -> None:
