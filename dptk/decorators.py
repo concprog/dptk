@@ -57,7 +57,7 @@ def configure(op: Callable, *args: Any, **kwargs: Any) -> Callable[[FrameContext
         )
     """
     if not hasattr(op, '__wrapped__'):
-        raise TypeError(f"{op.__name__} is not decorated with @frame_op or @metadata_op")
+        raise TypeError(f"{op.__name__} is not decorated with @frame_op or @metadata_op, follow the transform docs instead")
     
     original_func = op.__wrapped__
     sig = inspect.signature(original_func)

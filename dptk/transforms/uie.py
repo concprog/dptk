@@ -50,3 +50,10 @@ def ACE(frame: np.ndarray) -> np.ndarray:
     """
     # Placeholder
     return frame
+
+@frame_op
+def redHE(frame: np.ndarray):
+    r, g, b = cv2.split(frame)
+    he = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    r = he.apply(r)
+    return cv2.merge([r, g, b])
