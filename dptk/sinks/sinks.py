@@ -2,12 +2,11 @@ import cv2
 from typing import Callable, Iterable
 from ..context import FrameContext
 
-def display(window_name: str = "Output") -> Callable[[Iterable[FrameContext]], None]:
+def display(window_name: str = "Output", waitKey: int = 1) -> Callable[[Iterable[FrameContext]], None]:
     def consume(stream: Iterable[FrameContext]) -> None:
         for ctx in stream:
             cv2.imshow(window_name, ctx.frame)
-            # Wait 1ms for UI refresh
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            if cv2.waitKey(waitKey) & 0xFF == ord('q'):
                 break
         cv2.destroyAllWindows()
     return consume

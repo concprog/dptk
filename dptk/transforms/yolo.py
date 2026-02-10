@@ -1,7 +1,85 @@
 import numpy as np
 import cv2
 from ..context import FrameContext
+from typing import Optional, List, Callable
+from ultralytics import YOLO
 
+
+def yolo_detect(
+    model_path: str = "yolov8n.pt",
+    conf: float = 0.25,
+    iou: float = 0.45,
+    classes: list[int] | None = None,
+    device: str | None = None,
+    verbose: bool = False,
+    result_key: str = "yolo",
+) -> Callable[[FrameContext], FrameContext]:
+    """
+    Factory that creates a YOLO detection transform.
+    
+    Model is loaded ONCE when the transform is created, not per-frame.
+    Returns a function matching the standard transform signature.
+    
+    Args:
+        model_path: Path to YOLO model weights (.pt file)
+        conf: Confidence threshold for detections
+        iou: NMS IoU threshold
+        classes: Filter by class IDs (None = all classes)
+        device: Device to run on ('cpu', '0', '1', etc.)
+        verbose: Show inference logs
+        result_key: Key to store results in ctx.metadata
+    
+    Returns:
+        Transform function: FrameContext -> FrameContext
+    
+    Example:
+        >>> from dptk.transforms.yolo import yolo_detect
+        >>> detect = yolo_detect(model_path="yolov8n.pt", conf=0.5)
+        >>> stream.pipe(detect, draw_boxes())
+    """
+    print(f"[yolo_detect] Loading model from {model_path}...")
+    model = YOLO(model_path)
+    
+    model_args = {
+        "conf": conf,
+        "iou": iou,
+        "classes": classes,
+        "device": device,
+        "verbose": verbose,
+    }
+    
+    def transform(ctx: FrameContext) -> FrameContext:
+        """
+        Stateful transform closure. Uses pre-loaded model.
+        """
+        results = model(ctx.frame, **model_args)
+        
+        # Store in metadata (raw ultralytics Results object)
+        ctx.metadata[result_key] = results
+        
+        # Also store normalized detections for easy access
+        detections = []
+        for r in results:
+            boxes = r.boxes
+            if boxes is not None:
+                for box in boxes:
+                    detections.append({
+                        "class_id": int(box.cls),
+                        "class_name": r.names[int(box.cls)],
+                        "confidence": float(box.conf),
+                        "bbox": box.xyxy[0].tolist(),  # [x1, y1, x2, y2]
+                        "bbox_norm": box.xywhn[0].tolist(),  # normalized center x,y,w,h
+                    })
+        
+        ctx.metadata[f"{result_key}_detections"] = detections
+        ctx.metadata[f"{result_key}_count"] = len(detections)
+        
+        return ctx
+    
+    transform.model = model
+    transform.model_path = model_path
+    
+    return transform
 
 def crop_to_class(
     target_label: str | None = None,

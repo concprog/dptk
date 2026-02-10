@@ -42,9 +42,6 @@ class Stream:
 
         def generator() -> Iterator[FrameContext]:
             for ctx in self.source:
-                # If predicate is explicitly None, use standard Python truthiness filtering
-                # Since FrameContext is an object, 'if ctx' is always True.
-                # We explicitly check for None here to enable the "Functional Fail State".
                 if predicate is None:
                     if ctx is not None:
                         yield ctx
@@ -53,7 +50,6 @@ class Stream:
 
         return Stream(generator())
 
-    # Allow the Stream to be treated as an iterable directly
     def __iter__(self):
         return iter(self.source)
 
