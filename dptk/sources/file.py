@@ -1,12 +1,21 @@
 from ..context import FrameContext
+from ..decorators import threaded_source
 import glob
 import time
 import cv2
 from typing import Iterable
 
+@threaded_source
+
 def VideoSource(path: str) -> Iterable[FrameContext]:
     """
-    A generator that yields FrameContext objects from a video file.
+    Streams frames from a video file into FrameContext objects.
+    
+    Args:
+        path: The file path to the video.
+        
+    Yields:
+        Sequential FrameContext objects containing the video frames.
     """
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
@@ -29,9 +38,17 @@ def VideoSource(path: str) -> Iterable[FrameContext]:
     finally:
         cap.release()
 
+@threaded_source
 def FolderSource(path: str, recursive: bool = False) -> Iterable[FrameContext]:
     """
-    A generator that yields FrameContext objects from a folder of images.
+    Streams images from a directory into FrameContext objects.
+    
+    Args:
+        path: The path to the directory containing images.
+        recursive: Whether to search subdirectories recursively.
+        
+    Yields:
+        Sequential FrameContext objects containing the image frames.
     """
     walk = glob.glob(path + "/*.jpg", recursive=recursive)
     walk += glob.glob(path + "/*.png", recursive=recursive)

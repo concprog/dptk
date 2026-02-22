@@ -28,7 +28,6 @@ def test_undistort(ctx, calibration_data):
     assert res.frame.shape == (480, 640, 3)
 
 def test_detect_aruco_empty(ctx):
-    # Empty black frame -> no markers
     op = detect_aruco(metadata_key="aruco_data")
     res = op(ctx)
     assert "aruco_data" in res.metadata
@@ -38,22 +37,13 @@ def test_detect_aruco_empty(ctx):
 
 def test_estimate_pose_skips_empty(ctx, calibration_data):
     cm, dc = calibration_data
-    # 1. Detect (empty)
     ctx = detect_aruco(metadata_key="aruco_data")(ctx)
-    
-    # 2. Estimate Pose
     op = estimate_pose_single_markers(cm, dc, metadata_input_key="aruco_data", metadata_output_key="pose_data")
     res = op(ctx)
-    
-    # Logic in pose.py returns early if id list is None/Empty, so key might NOT be created or be empty
-    # Let's check implementation behavior: 
-    # "if ids is None or len(ids) == 0: return ctx"
-    # So "pose_data" will NOT be in metadata
     assert "pose_data" not in res.metadata
 
 def test_solve_pnp_random(ctx, calibration_data):
     cm, dc = calibration_data
-    # Create random 3D points and correpsonding 2D points to force a solve
     obj_points = np.array([
         [0,0,0], [1,0,0], [0,1,0], [0,0,1],
         [1,1,0], [0,1,1]

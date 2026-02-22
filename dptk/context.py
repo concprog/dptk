@@ -5,12 +5,17 @@ import numpy as np
 @dataclass(slots=True)
 class FrameContext:
     """
-    container for a single frame, with metadata and index
+    Data container representing a single video frame and its associated metadata.
+
+    Attributes:
+        frame: The image data as a numpy array.
+        index: The sequential number of the frame in the stream.
+        timestamp: The time the frame was captured or processed.
+        metadata: Store for arbitrary data appended by transforms or models.
     """
     frame: np.ndarray
     index: int
     timestamp: float
-    # Dictionary for arbitrary metadata (e.g., detections, model outputs)
     metadata: dict = field(default_factory=dict)
 
     def __post_init__(self):

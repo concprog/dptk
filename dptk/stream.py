@@ -1,55 +1,144 @@
-from typing import Iterable, Callable, Iterator
+import threading
+import multiprocess
+from typing import Iterable, Callable, Iterator, Optional, List
 from .context import FrameContext
-
+from .decorators import threaded_sink, _SENTINEL
 
 class Stream:
-    def __init__(self, source: Iterable[FrameContext]):
-        self.source = source
-
-    def pipe(self, *ops: Callable[[FrameContext], FrameContext]) -> "Stream":
+    """
+    Directed acyclic graph node representing a stream of frame contexts.
+    
+    A Stream can act as a root source processing a generator, or a child node
+    applying transformations to data received from a parent Stream.
+    """
+    def __init__(self, source_generator: Iterable | None = None, ops: tuple = (), parent: 'Stream' | None = None):
         """
-        Lazily chains operations.
-        Returns a NEW Stream object wrapping a generator.
+        Initializes a new Stream instance.
         """
+        self.parent = parent
+        self.ops = ops
+        
+        self._input_queue: multiprocess.Queue = multiprocess.Queue(maxsize=64)
+        
+        self._output_queues: List[multiprocess.Queue] = []
+        
+        self._worker: Optional[multiprocess.Process | threading.Thread] = None
+        self._generator = source_generator
+        
+        self._running = False
 
-        def generator() -> Iterator[FrameContext]:
-            for ctx in self.source:
-                processed_ctx = ctx
-                should_yield = True
-                for op in ops:
-                    processed_ctx = op(processed_ctx)
-                    if processed_ctx is None:
-                        should_yield = False
-                        break
-                
-                if should_yield:
-                    yield processed_ctx
+        if self.parent:
+            self.parent._output_queues.append(self._input_queue)
 
-        return Stream(generator())
-
-    def subscribe(self, sink: Callable[[Iterable[FrameContext]], None]) -> None:
+    def _ensure_running(self):
         """
-        Triggers the consumption of the stream.
-        Passes the iterable to the sink function.
+        Recursively triggers the execution of this stream and all its parent streams.
         """
-        sink(self.source)
+        if self._running:
+            return
+        
+        self._running = True
+        
+        if self.parent:
+            self.parent._ensure_running()
+        
+        if self._worker is None:
+            if self.parent is None:
+                self._worker = threading.Thread(target=self._source_loop, daemon=True)
+            else:
+                self._worker = multiprocess.Process(
+                    target=self._run_transform_process,
+                    args=(self._input_queue, self._output_queues, self.ops)
+                )
+            
+            self._worker.start()
 
-    def filter(self, predicate: Callable | None = None) -> "Stream":
+    def _source_loop(self):
         """
-        Filters the stream.
-        If predicate is None (default), it removes all items that are None.
+        Executes the root generator source and distributes items to connected output queues.
         """
+        try:
+            iterable = self._generator() if callable(self._generator) else self._generator
+            for item in iterable:
+                for q in self._output_queues:
+                    q.put(item)
+        finally:
+            for q in self._output_queues:
+                q.put(_SENTINEL)
 
-        def generator() -> Iterator[FrameContext]:
-            for ctx in self.source:
-                if predicate is None:
-                    if ctx is not None:
-                        yield ctx
-                elif predicate(ctx):
-                    yield ctx
+    @staticmethod
+    def _run_transform_process(in_queue: multiprocess.Queue, out_queues: List[multiprocess.Queue], ops: tuple):
+        """
+        Consumes frames from the input queue, applies transformations sequentially,
+        and distributes the results to all output queues.
+        """
+        for ctx in iter(in_queue.get, _SENTINEL):
+            processed_ctx = ctx
+            for op in ops:
+                processed_ctx = op(processed_ctx)
+                if processed_ctx is None:
+                    break
+            
+            if processed_ctx is not None:
+                for q in out_queues:
+                    q.put(processed_ctx)
+        
+        for q in out_queues:
+            q.put(_SENTINEL)
 
-        return Stream(generator())
+    def pipe(self, *ops: Callable) -> 'Stream':
+        """
+        Creates and connects a new child stream to this stream, applying the provided operations.
+        """
+        return Stream(ops=ops, parent=self)
 
-    def __iter__(self):
-        return iter(self.source)
+    def filter(self, predicate: Callable | None = None) -> 'Stream':
+        """
+        Creates a new child stream that filters out frames failing the predicate.
+        If no predicate is provided, filters out None objects.
+        """
+        if predicate is None:
+            op = lambda ctx: ctx if ctx is not None else None
+        else:
+            op = lambda ctx: ctx if predicate(ctx) else None
+        return self.pipe(op)
 
+    def subscribe(self, sink: Callable) -> None:
+        """
+        Attaches a final consumption function to the stream and initiates execution.
+        """
+        sink_queue = multiprocess.Queue(maxsize=64)
+        self._output_queues.append(sink_queue)
+        
+        @threaded_sink
+        def sink_runner():
+            sink(iter(sink_queue.get, _SENTINEL))
+        
+        sink_runner()
+        
+        self._ensure_running()
+
+    def __enter__(self):
+        """
+        Context manager entry point.
+        """
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Context manager exit point to ensure workers are joined.
+        """
+        self.join()
+
+    def join(self):
+        """
+        Waits for the stream worker to complete execution and terminates if halted.
+        """
+        if self._worker:
+            if isinstance(self._worker, threading.Thread):
+                pass 
+            elif isinstance(self._worker, multiprocess.Process):
+                if self._worker.is_alive():
+                    self._worker.join(timeout=1.0)
+                    if self._worker.is_alive():
+                        self._worker.terminate()

@@ -1,6 +1,6 @@
 # dptk
 
-`dptk` is a lightweight, functional-style library for building video and perception processing pipelines. It emphasizes lazy evaluation, modularity, and a clear separation between data sources, transformations, and sinks.
+`dptk` is a lightweight, lazy library for building video and perception processing pipelines
 
 ## Core Concepts
 
@@ -161,10 +161,30 @@ Many invoke the `@frame_op` decorator internally.
 - `crop_to_class`: Crops detection regions.
 - `draw_boxes`: Visualizes detections.
 
+## Coding Conventions & Docstrings Format
+
+The `dptk` codebase follows strict guidelines to maintain readability while keeping code concise:
+- **No Inline Comments**: The code is written to be self-documenting. Inline comments are intentionally omitted to reduce clutter, preserve screen space, and encourage clean code structure.
+- **Concise Docstrings**: Every transform, source, and sink must have a clear docstring following a simplified Google Python Style format. This provides essential context for LLMs and developers without being overly verbose.
+
+**Example Docstring Format**:
+```python
+def my_transform(param: int = 0) -> Callable[[FrameContext], FrameContext]:
+    """
+    Brief description of what the transform does.
+    
+    Args:
+        param: Description of the parameter.
+        
+    Returns:
+        Transform function processing incoming FrameContext structures.
+    """
+```
+
 ## Summary
 
 1.  **Wrap** data in `FrameContext`.
 2.  **Create** a `Stream` from a source.
 3.  **Chain** operations using `.pipe()`.
-4. **Filter** out unwanted frames using `.filter()`.
+4.  **Filter** out unwanted frames using `.filter()`.
 5.  **Execute** by attaching a Sink.

@@ -3,6 +3,16 @@ from typing import Callable, Iterable
 from ..context import FrameContext
 
 def display(window_name: str = "Output", waitKey: int = 1) -> Callable[[Iterable[FrameContext]], None]:
+    """
+    Creates a sink that displays frames in an OpenCV window.
+    
+    Args:
+        window_name: The title of the display window.
+        waitKey: The delay in milliseconds for cv2.waitKey.
+        
+    Returns:
+        A callable that consumes a stream of FrameContext objects.
+    """
     def consume(stream: Iterable[FrameContext]) -> None:
         for ctx in stream:
             cv2.imshow(window_name, ctx.frame)
@@ -13,6 +23,16 @@ def display(window_name: str = "Output", waitKey: int = 1) -> Callable[[Iterable
 
 
 def write(path: str, fps: float = 30.0) -> Callable[[Iterable[FrameContext]], None]:
+    """
+    Creates a sink that writes frames to a video file.
+    
+    Args:
+        path: The output file path (e.g., 'output.mp4').
+        fps: The frames per second for the output video.
+        
+    Returns:
+        A callable that consumes a stream of FrameContext objects.
+    """
     def consume(stream: Iterable[FrameContext]) -> None:
         writer = None
         
@@ -30,13 +50,17 @@ def write(path: str, fps: float = 30.0) -> Callable[[Iterable[FrameContext]], No
 
 
 def count() -> tuple[Callable[[Iterable[FrameContext]], None], Callable[[], int]]:
+    """
+    Creates a sink that counts the number of frames passing through it.
+    
+    Returns:
+        A tuple containing the consumer callable and a function to retrieve the current count.
+    """
     counter = {'n': 0}
     
     def consume(stream: Iterable[FrameContext]) -> None:
         for _ in stream:
             counter['n'] += 1
-            
-    def get_count() -> int:
-        return counter['n']
+        print(counter['n'])
         
-    return consume, get_count
+    return consume
