@@ -1,5 +1,6 @@
 import threading
 import multiprocess
+import time
 from typing import Iterable, Callable, Iterator, Optional, List
 from .context import FrameContext
 from .decorators import threaded_sink, _SENTINEL
@@ -142,3 +143,40 @@ class Stream:
                     self._worker.join(timeout=1.0)
                     if self._worker.is_alive():
                         self._worker.terminate()
+
+def run(*streams: Stream):
+    """
+    Blocks the main thread until all provided streams (and their upstream parents) 
+    are finished processing.
+    
+    This replaces the need for manual while-loops or rclpy.spin() calls in main().
+    """
+    # 1. Ensure everything is running
+    for s in streams:
+        s._ensure_running()
+
+    try:
+        # 2. Block until the root source queues are closed and workers join.
+        roots = set()
+        for s in streams:
+            current = s
+            while current.parent:
+                current = current.parent
+            roots.add(current)
+        
+        while any(r._worker and r._worker.is_alive() for r in roots):
+            time.sleep(0.1)
+            
+    except KeyboardInterrupt:
+        print("\\nStopping pipeline...")
+        # Inject the sentinel into all root queues to forcefully terminate downstream child processes
+        for r in roots:
+            for q in r._output_queues:
+                try:
+                    q.put(_SENTINEL)
+                except Exception:
+                    pass
+    finally:
+        # Cleanup
+        for r in roots:
+            r.join()

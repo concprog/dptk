@@ -15,17 +15,16 @@ This structure allows every stage of the pipeline to read/write shared data with
 
 ## Streams
 
-The `Stream` class (`dptk.stream.Stream`) ensures your pipeline is **lazy**. When you define a pipeline, you are building a recipe; no data is processed until you explicitly ask for it.
+The `Stream` class (`dptk.stream.Stream`) ensures your pipeline is **lazy and highly parallel**. When you define a pipeline, you are building a directed acyclic graph (DAG); no data is processed until you explicitly ask for it. Under the hood, each branch of the stream runs isolated in its own `multiprocess.Process` to bypass Python's GIL.
 
 ### Creating a Stream
-Streams start from a **Source**. A source is simply any Python iterable that yields `FrameContext` objects.
+Streams start from a **Source**. A source is constructed by decorating a Python generator with `@threaded_source`. This automatically spawns a background daemonic thread that publishes yielded `FrameContext` objects into a shared queue, forming the root node of the stream processing graph.
 
 ```python
-from dptk.stream import Stream
 from dptk.sources.file import VideoSource
 
-# This does NOT read the file yet.
-stream = Stream(VideoSource("video.mp4"))
+# This does NOT read the file yet. Sources automatically return a Stream.
+stream = VideoSource("video.mp4")
 ```
 
 ### Pipelining
@@ -84,7 +83,7 @@ def filter_by_score(threshold):
 
 ## Sinks
 
-A **Sink** is the end of the line. It consumes the stream, pulling data through the pipeline. Sinks are any function that accepts an iterable of `FrameContext`.
+A **Sink** is the end of the line. It consumes the stream, pulling data through the pipeline graph. Sinks are any function that accepts an iterable of `FrameContext`. When attached via `.subscribe()`, the sink is automatically dispatched to an asynchronous background thread pool, preventing UI blocking for display sinks or IO bottlenecks for write sinks.
 
 Common sinks include:
 -   `dptk.sinks.display`: Shows frames in a window.
@@ -92,13 +91,18 @@ Common sinks include:
 
 ## Execution
 
-Because streams are lazy, simply defining the pipeline does nothing. To execute the pipeline, you must **subscribe** a sink or iterate over the stream.
+Because streams are lazy, defining the pipeline does not execute it. Data is pulled through the pipeline only when consumed. For threaded backends (e.g., video or ROS sources), you must **subscribe** a sink and block the main thread using `run()`.
 
 ```python
-# Option 1: Use .subscribe() (Recommended for full pipelines)
+from dptk import run
+
+# Option 1: Use .subscribe() and run() (Recommended for full DAG pipelines)
 pipeline.subscribe(display("My Window"))
 
-# Option 2: Iterate manually (Useful for debugging or custom loops)
+# Block the main thread until the pipeline (and its sources) completes
+run(pipeline)
+
+# Option 2: Iterate manually (Useful for debugging or custom synchronous loops)
 for ctx in pipeline:
     print(f"Processed frame {ctx.index}")
 ```
@@ -108,9 +112,14 @@ for ctx in pipeline:
 dptk/
 ├── __init__.py
 ├── context.py          # Core FrameContext container
-├── stream.py           # Stream orchestration
+├── stream.py           # Stream orchestration and `run()` engine
 ├── decorators.py       # @frame_op decorator
 ├── sinks.py            # Sinks (display, write)
+├── ros/                # ROS 2 Integration
+│   ├── __init__.py
+│   ├── msgs.py
+│   ├── source.py       # RosSource
+│   └── sink.py         # RosPublisherSink
 ├── sources/
 │   ├── __init__.py
 │   ├── file.py         # VideoSource
@@ -181,10 +190,49 @@ def my_transform(param: int = 0) -> Callable[[FrameContext], FrameContext]:
     """
 ```
 
+### `dptk.ros` (ROS 2 Streams)
+- `RosSource(topic_name)`: Plugs into a ROS topic creating a Stream.
+- `RosPublisherSink(node, topic_name)`: Publishes context frames back to ROS.
+
+**Example ROS 2 Pipeline:**
+```python
+import rclpy
+from dptk import run, configure
+from dptk.ros import RosSource, RosPublisherSink
+from dptk.transforms.uie import CLAHE
+from dptk.transforms.yolo import yolo_detect, crop_to_class
+
+def main():
+    rclpy.init()
+    node = rclpy.create_node('dptk_ros_pipeline')
+    
+    stream = RosSource("/camera/image_raw")
+    
+    pipeline = stream.pipe(
+        configure(CLAHE, clipLimit=1.5, tileGridSize=(2, 2)),
+    )
+    
+    gate = stream.pipe(
+        yolo_detect("last.pt"),
+        crop_to_class(target_label="gate"),
+    ).filter()
+    
+    pipeline.subscribe(RosPublisherSink(node, "/processed/image"))
+    
+    # Blocks, gracefully cascades shutdown to multiprocesses on SIGINT
+    run(pipeline, gate)
+    
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == "__main__":
+    main()
+```
+
 ## Summary
 
 1.  **Wrap** data in `FrameContext`.
-2.  **Create** a `Stream` from a source.
+2.  **Create** a `Stream` from a source (e.g., `VideoSource`, `RosSource`).
 3.  **Chain** operations using `.pipe()`.
 4.  **Filter** out unwanted frames using `.filter()`.
-5.  **Execute** by attaching a Sink.
+5.  **Execute** by attaching a Sink (`.subscribe()`) and keeping the app alive with `run(stream)`.

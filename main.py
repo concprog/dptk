@@ -2,7 +2,7 @@ from dptk.stream import Stream
 from dptk.sources.file import VideoSource
 from dptk.transforms.uie import CLAHE, gamma_correction, grayworld, redHE, white_patch
 from dptk.sinks import display, count, write
-from dptk import configure
+from dptk import configure, run
 from dptk.transforms.yolo import crop_to_class, yolo_detect
 
 
@@ -22,6 +22,8 @@ def main():
 
     gate.subscribe(count())
     pipeline.subscribe(write("../uie_output.mp4"))
+
+    run(pipeline, gate)
 
 
 if __name__ == "__main__":
