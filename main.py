@@ -1,9 +1,8 @@
-from dptk.stream import Stream
 from dptk.sources.file import VideoSource
 from dptk.transforms.uie import CLAHE, gamma_correction, grayworld, redHE, white_patch
-from dptk.sinks import display, count, write
-from dptk import configure, run
 from dptk.transforms.yolo import crop_to_class, yolo_detect
+from dptk.sinks import write
+from dptk import configure, run
 
 
 def main():
@@ -15,7 +14,7 @@ def main():
         configure(grayworld, 1.0),
     )
 
-    gate = stream.pipe(
+    gate = pipeline.pipe(
         yolo_detect("models/last.pt"),
         crop_to_class(target_label="gate", resize_to=(640, 640)),
     ).filter()
