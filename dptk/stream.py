@@ -1,31 +1,42 @@
 import threading
 import multiprocess
-import time
 from typing import Iterable, Callable, Iterator, Optional, List
-from .context import FrameContext
-from .decorators import threaded_sink, _SENTINEL
+
+from os import cpu_count
+from concurrent.futures import ThreadPoolExecutor
+import time
+from .context import _SENTINEL
+
+
+_sink_executor = ThreadPoolExecutor(max_workers=cpu_count()-2)
 
 class Stream:
     """
     Directed acyclic graph node representing a stream of frame contexts.
-    
+
     A Stream can act as a root source processing a generator, or a child node
     applying transformations to data received from a parent Stream.
     """
-    def __init__(self, source_generator: Iterable | None = None, ops: tuple = (), parent: 'Stream' | None = None):
+
+    def __init__(
+        self,
+        source_generator: Optional[Iterable | Callable[[], Iterable]] = None,
+        ops: tuple = (),
+        parent: Optional["Stream"] = None,
+    ):
         """
         Initializes a new Stream instance.
         """
         self.parent = parent
         self.ops = ops
-        
+
         self._input_queue: multiprocess.Queue = multiprocess.Queue(maxsize=64)
-        
+
         self._output_queues: List[multiprocess.Queue] = []
-        
+
         self._worker: Optional[multiprocess.Process | threading.Thread] = None
         self._generator = source_generator
-        
+
         self._running = False
 
         if self.parent:
@@ -37,21 +48,21 @@ class Stream:
         """
         if self._running:
             return
-        
+
         self._running = True
-        
+
         if self.parent:
             self.parent._ensure_running()
-        
+
         if self._worker is None:
             if self.parent is None:
                 self._worker = threading.Thread(target=self._source_loop, daemon=True)
             else:
                 self._worker = multiprocess.Process(
                     target=self._run_transform_process,
-                    args=(self._input_queue, self._output_queues, self.ops)
+                    args=(self._input_queue, self._output_queues, self.ops),
                 )
-            
+
             self._worker.start()
 
     def _source_loop(self):
@@ -59,7 +70,9 @@ class Stream:
         Executes the root generator source and distributes items to connected output queues.
         """
         try:
-            iterable = self._generator() if callable(self._generator) else self._generator
+            iterable = (
+                self._generator() if callable(self._generator) else self._generator
+            )
             for item in iterable:
                 for q in self._output_queues:
                     q.put(item)
@@ -68,7 +81,9 @@ class Stream:
                 q.put(_SENTINEL)
 
     @staticmethod
-    def _run_transform_process(in_queue: multiprocess.Queue, out_queues: List[multiprocess.Queue], ops: tuple):
+    def _run_transform_process(
+        in_queue: multiprocess.Queue, out_queues: List[multiprocess.Queue], ops: tuple
+    ):
         """
         Consumes frames from the input queue, applies transformations sequentially,
         and distributes the results to all output queues.
@@ -79,21 +94,21 @@ class Stream:
                 processed_ctx = op(processed_ctx)
                 if processed_ctx is None:
                     break
-            
+
             if processed_ctx is not None:
                 for q in out_queues:
                     q.put(processed_ctx)
-        
+
         for q in out_queues:
             q.put(_SENTINEL)
 
-    def pipe(self, *ops: Callable) -> 'Stream':
+    def pipe(self, *ops: Callable) -> "Stream":
         """
         Creates and connects a new child stream to this stream, applying the provided operations.
         """
         return Stream(ops=ops, parent=self)
 
-    def filter(self, predicate: Callable | None = None) -> 'Stream':
+    def filter(self, predicate: Callable | None = None) -> "Stream":
         """
         Creates a new child stream that filters out frames failing the predicate.
         If no predicate is provided, filters out None objects.
@@ -110,12 +125,9 @@ class Stream:
         """
         sink_queue = multiprocess.Queue(maxsize=64)
         self._output_queues.append(sink_queue)
-        
-        @threaded_sink
-        def sink_runner():
-            sink(iter(sink_queue.get, _SENTINEL))
-        
-        sink_runner()
+
+        queue_iterator = iter(sink_queue.get, _SENTINEL)
+        _sink_executor.submit(sink, queue_iterator)
         
         self._ensure_running()
 
@@ -137,18 +149,19 @@ class Stream:
         """
         if self._worker:
             if isinstance(self._worker, threading.Thread):
-                pass 
+                pass
             elif isinstance(self._worker, multiprocess.Process):
                 if self._worker.is_alive():
                     self._worker.join(timeout=1.0)
                     if self._worker.is_alive():
                         self._worker.terminate()
 
+
 def run(*streams: Stream):
     """
-    Blocks the main thread until all provided streams (and their upstream parents) 
+    Blocks the main thread until all provided streams (and their upstream parents)
     are finished processing.
-    
+
     This replaces the need for manual while-loops or rclpy.spin() calls in main().
     """
     # 1. Ensure everything is running
@@ -163,10 +176,10 @@ def run(*streams: Stream):
             while current.parent:
                 current = current.parent
             roots.add(current)
-        
+
         while any(r._worker and r._worker.is_alive() for r in roots):
             time.sleep(0.1)
-            
+
     except KeyboardInterrupt:
         print("\\nStopping pipeline...")
         # Inject the sentinel into all root queues to forcefully terminate downstream child processes

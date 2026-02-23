@@ -16,12 +16,12 @@ def main():
     )
 
     gate = stream.pipe(
-        yolo_detect("last.pt"),
-        crop_to_class(target_label="gate"),
+        yolo_detect("models/last.pt"),
+        crop_to_class(target_label="gate", resize_to=(640, 640)),
     ).filter()
 
-    gate.subscribe(count())
-    pipeline.subscribe(write("../uie_output.mp4"))
+    gate.subscribe(write("models/gate_output.mp4"))
+    pipeline.subscribe(write("models/uie_output.mp4"))
 
     run(pipeline, gate)
 

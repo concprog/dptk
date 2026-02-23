@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any
 import numpy as np
 
+
 @dataclass(slots=True)
 class FrameContext:
     """
@@ -13,6 +14,7 @@ class FrameContext:
         timestamp: The time the frame was captured or processed.
         metadata: Store for arbitrary data appended by transforms or models.
     """
+
     frame: np.ndarray
     index: int
     timestamp: float
@@ -23,3 +25,7 @@ class FrameContext:
             raise TypeError(f"frame must be np.ndarray, got {type(self.frame)}")
         if self.timestamp < 0:
             raise ValueError("timestamp must be non-negative")
+
+
+_SENTINEL = "__DPTK_STREAM_SENTINEL__"
+

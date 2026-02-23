@@ -10,44 +10,44 @@ from ..context import FrameContext
 from ..stream import Stream
 from ..decorators import _SENTINEL
 
+
 class _RosListenerNode(Node):
     """
-    Internal helper node. 
+    Internal helper node.
     It runs in a background thread and dumps data into a multiprocessing.Queue.
     """
+
     def __init__(self, topic_name: str, queue: multiprocess.Queue):
-        super().__init__('pipeline_listener_node')
+        super().__init__("pipeline_listener_node")
         self.queue = queue
         self.bridge = CvBridge()
         self.subscription = self.create_subscription(
-            Image,
-            topic_name,
-            self.listener_callback,
-            10
+            Image, topic_name, self.listener_callback, 10
         )
         self.subscription  # prevent unused variable warning
 
     def listener_callback(self, msg):
         try:
-            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            
+            cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+
             ctx = FrameContext(
                 frame=cv_image,
-                index=msg.header.stamp.nanosec, 
+                index=msg.header.stamp.nanosec,
                 timestamp=msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9,
-                metadata={'ros_topic': msg.header.frame_id}
+                metadata={"ros_topic": msg.header.frame_id},
             )
-            
+
             self.queue.put(ctx)
         except Exception as e:
-            self.get_logger().error(f'Error in callback: {e}')
+            self.get_logger().error(f"Error in callback: {e}")
+
 
 def RosSource(topic_name: str) -> Stream:
     """
     Creates a Stream from a ROS 2 topic.
     """
     q = multiprocess.Queue(maxsize=64)
-    
+
     def ros_spin_loop():
         # Only init if not already initialized
         if not rclpy.ok():
