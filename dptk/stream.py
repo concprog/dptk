@@ -5,9 +5,8 @@ from typing import Iterable, Callable, Iterator, Optional, List
 from os import cpu_count
 from concurrent.futures import ThreadPoolExecutor
 import time
-from .context import _SENTINEL
 
-
+_SENTINEL = "__DPTK_STREAM_SENTINEL__"
 _sink_executor = ThreadPoolExecutor(max_workers=cpu_count()-2)
 
 class Stream:
@@ -157,7 +156,7 @@ class Stream:
                         self._worker.terminate()
 
 
-def run(*streams: Stream):
+def wait_till_complete(*streams: Stream):
     """
     Blocks the main thread until all provided streams (and their upstream parents)
     are finished processing.

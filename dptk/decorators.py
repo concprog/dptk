@@ -3,7 +3,7 @@ import numpy as np
 import functools
 import inspect
 
-from .context import FrameContext, _SENTINEL
+from .context import FrameContext
 
 
 def frame_op(
@@ -30,6 +30,7 @@ def frame_op(
             ctx.frame = result
         return ctx
 
+    wrapper.__transform__ = True
     wrapper.__wrapped__ = func
 
     return wrapper

@@ -27,5 +27,4 @@ class FrameContext:
             raise ValueError("timestamp must be non-negative")
 
 
-_SENTINEL = "__DPTK_STREAM_SENTINEL__"
 

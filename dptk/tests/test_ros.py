@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from dptk.stream import Stream, run
+from dptk.stream import Stream, wait_till_complete
 
 
 def test_run_logic():
@@ -14,6 +14,6 @@ def test_run_logic():
 
     # Running should join the worker and not hang
     with patch("dptk.stream.time.sleep", side_effect=KeyboardInterrupt):
-        run(s2)
+        wait_till_complete(s2)
 
     mock_worker.join.assert_called_once()
