@@ -53,5 +53,5 @@ def FolderSource(path: str, recursive: bool = False) -> Iterable[FrameContext]:
     walk += glob.glob(path + "/*.jpeg", recursive=recursive)
     for i, image in enumerate(walk):
         yield FrameContext(
-            frame=cv2.imread(image), index=i, timestamp=time.time(), metadata={}
+            frame=cv2.imread(image), index=i, timestamp=time.time(), metadata={"path": image}
         )

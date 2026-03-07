@@ -150,24 +150,36 @@ def rotate_bound(angle: float) -> Callable[[FrameContext], FrameContext]:
 
     return _op
 
+
 @frame_op
 def normalize(frame: np.ndarray) -> np.ndarray:
     r, g, b = cv2.split(frame)
-    cv2.normalize(r, r, 0, 255, norm_type=cv2.NORM_MINMAX)
-    cv2.normalize(g, g, 0, 255, norm_type=cv2.NORM_MINMAX)
-    cv2.normalize(b, b, 0, 255, norm_type=cv2.NORM_MINMAX)
+    cv2.normalize(r, r, 1, 255, norm_type=cv2.NORM_MINMAX)
+    cv2.normalize(g, g, 1, 255, norm_type=cv2.NORM_MINMAX)
+    cv2.normalize(b, b, 1, 255, norm_type=cv2.NORM_MINMAX)
     frame = cv2.merge([r, g, b])
     return frame
 
+
 @frame_op
 def normalize_intensity(frame: np.ndarray) -> np.ndarray:
-    cv2.normalize(frame, frame, 0, 255, norm_type=cv2.NORM_MINMAX)
-    return frame
+    h, s, v = cv2.split(cv2.cvtColor(frame, cv2.COLOR_RGB2HSV))
+    cv2.normalize(v, v, 1, 255, norm_type=cv2.NORM_MINMAX)
+    return cv2.cvtColor(cv2.merge([h, s, v]), cv2.COLOR_HSV2RGB)
+
+@frame_op
+def normalize_ab(frame: np.ndarray) -> np.ndarray:
+    l, a, b = cv2.split(cv2.cvtColor(frame, cv2.COLOR_RGB2Lab))
+    cv2.normalize(a, a, 1, 255, norm_type=cv2.NORM_MINMAX)
+    cv2.normalize(b, b, 1, 255, norm_type=cv2.NORM_MINMAX)
+    return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_Lab2RGB)
+
 
 @frame_op
 def gblur(frame: np.ndarray) -> np.ndarray:
-    cv2.GaussianBlur(frame, (11,11), 0, frame)
+    cv2.GaussianBlur(frame, (11, 11), 0, frame)
     return frame
+
 
 @frame_op
 def remove_color_cast(frame: np.ndarray) -> np.ndarray:
@@ -181,11 +193,12 @@ def remove_color_cast(frame: np.ndarray) -> np.ndarray:
     blend = cv2.addWeighted(frame, 0.6, color_img, 0.4, 0)
     return blend
 
+
 @frame_op
 def color_transfer_frame(frame: np.ndarray, preserve_paper: bool = False) -> np.ndarray:
     """
     Applies color transfer to a single frame using hardcoded ImageNet statistics.
-    
+
     Parameters:
     ----------
     frame : np.ndarray
@@ -193,26 +206,37 @@ def color_transfer_frame(frame: np.ndarray, preserve_paper: bool = False) -> np.
     preserve_paper : bool, optional
         If True, uses the scaling factor from the Reinhard et al. paper.
         If False, uses the reciprocal factor for potentially different aesthetics.
-    
+
     Returns:
     -------
     np.ndarray
         The color-transferred image in RGB format (uint8).
     """
-    lMeanSrc, lStdSrc, aMeanSrc, aStdSrc, bMeanSrc, bStdSrc = 172.199,24.700,120.445,6.023,136.327,15.125
+    lMeanSrc, lStdSrc, aMeanSrc, aStdSrc, bMeanSrc, bStdSrc = (
+        172.199,
+        27.70,
+        127.00,
+        10.023,
+        136.327,
+        15.125,
+    )
 
     lab = cv2.cvtColor(frame, cv2.COLOR_RGB2LAB).astype("float32")
-    
+
     (l, a, b) = cv2.split(lab)
-    (lMeanTar, lStdTar) = (l.mean(), l.std())
-    (aMeanTar, aStdTar) = (a.mean(), a.std())
-    (bMeanTar, bStdTar) = (b.mean(), b.std())
-    
+    # (lMeanTar, lStdTar) = (l.mean(), l.std())
+    # (aMeanTar, aStdTar) = (a.mean(), a.std())
+    # (bMeanTar, bStdTar) = (b.mean(), b.std())
+
+    (lMeanTar, lStdTar) = cv2.meanStdDev(l)
+    (aMeanTar, aStdTar) = cv2.meanStdDev(a)
+    (bMeanTar, bStdTar) = cv2.meanStdDev(b)
+
     # Subtract target means
     l -= lMeanTar
     a -= aMeanTar
     b -= bMeanTar
-    
+
     # Scale by standard deviations
     if preserve_paper:
         # Paper method: scale by (target_std / source_std)
@@ -224,26 +248,28 @@ def color_transfer_frame(frame: np.ndarray, preserve_paper: bool = False) -> np.
         l = (lStdSrc / lStdTar) * l
         a = (aStdSrc / aStdTar) * a
         b = (bStdSrc / bStdTar) * b
-    
+
     l += lMeanSrc
     a += aMeanSrc
     b += bMeanSrc
-    
+
     l = np.clip(l, 0, 255)
     a = np.clip(a, 0, 255)
     b = np.clip(b, 0, 255)
-    
+
     transfer = cv2.merge([l, a, b])
-    transfer = cv2.cvtColor(transfer.astype("uint8"), cv2.COLOR_LAB2RGB)
-    
+    transfer = cv2.cvtColor(transfer.astype(np.uint8), cv2.COLOR_LAB2RGB)
+
     return transfer
+
 
 @frame_op
 def satboost(frame: np.ndarray, alpha=1.1) -> np.ndarray:
     h, s, v = cv2.split(cv2.cvtColor(frame, cv2.COLOR_RGB2HSV))
-    s = np.clip(s*alpha, 0 ,255).astype(np.uint8)
+    s = np.clip(s * alpha, 0, 255).astype(np.uint8)
     # v = cv2.normalize(v, v, 0, 255, cv2.NORM_MINMAX)
-    return cv2.cvtColor(cv2.merge([h,s,v]), cv2.COLOR_HSV2RGB)
+    return cv2.cvtColor(cv2.merge([h, s, v]), cv2.COLOR_HSV2RGB)
+
 
 def find_contours(
     mode: int = cv2.RETR_EXTERNAL,
