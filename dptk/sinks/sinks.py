@@ -71,7 +71,7 @@ def count() -> tuple[Callable[[Iterable[FrameContext]], None], Callable[[], int]
 def replace_images_in_folder():
     def consume(stream: Iterable[FrameContext]) -> None:
         for ctx in stream:
-            path = ctx.metadata.get("image", None)
+            path = ctx.metadata.get("path", None)
             if path is not None:
                 cv2.imwrite(path, ctx.frame)
     return consume

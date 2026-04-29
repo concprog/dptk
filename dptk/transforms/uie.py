@@ -50,16 +50,16 @@ def grayworld(frame: np.ndarray, alpha: float = 1.4) -> np.ndarray:
 
     l_channel_norm = result[:, :, 0] / 255.0
 
-    result[:, :, 1] = result[:, :, 1] - ((avg_a - 140) * l_channel_norm * alpha)
-    result[:, :, 2] = result[:, :, 2] - ((avg_b - 128) * l_channel_norm * alpha)
+    result[:, :, 1] = result[:, :, 1] - ((avg_a - 128) * l_channel_norm * alpha)
+    result[:, :, 2] = result[:, :, 2] - ((avg_b - 127) * l_channel_norm * alpha)
 
     result = np.clip(result, 0, 255).astype(np.uint8)
     return cv2.cvtColor(result, cv2.COLOR_LAB2RGB)
 
 def wb():
-    wb = cv2.xphoto.createLearningBasedWB()
+    wb = cv2.xphoto.createGrayworldWB()
     def _op(ctx: FrameContext) -> FrameContext:
-        ctx.frame = wb.balanceWhite(ctx.frame)
+        ctx.frame = wb.balanceWhite(ctx.frame.astype(np.uint8))
         return ctx
     return _op
 
@@ -242,3 +242,13 @@ def gamma_correction(frame: np.ndarray, gamma: float = 2.2) -> np.ndarray:
     ).astype("uint8")
 
     return cv2.LUT(frame, table)
+
+@frame_op
+def gamma0(frame: np.ndarray) -> np.ndarray:
+    i = np.arange(256)
+    f = ((i + 0.5) / 256) ** (5 / 6)
+    LUT = np.uint8(f * 256 - 0.5)
+
+    img_ycrcb = cv2.cvtColor(frame, cv2.COLOR_RGB2YCrCb)
+    img_ycrcb[:, :, 0] = LUT[img_ycrcb[:, :, 0]]
+    return cv2.cvtColor(img_ycrcb, cv2.COLOR_YCrCb2RGB)

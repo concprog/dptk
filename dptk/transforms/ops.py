@@ -164,20 +164,27 @@ def normalize(frame: np.ndarray) -> np.ndarray:
 @frame_op
 def normalize_intensity(frame: np.ndarray) -> np.ndarray:
     h, s, v = cv2.split(cv2.cvtColor(frame, cv2.COLOR_RGB2HSV))
-    cv2.normalize(v, v, 1, 255, norm_type=cv2.NORM_MINMAX)
+    cv2.normalize(s, s, 1, 225, norm_type=cv2.NORM_MINMAX)
     return cv2.cvtColor(cv2.merge([h, s, v]), cv2.COLOR_HSV2RGB)
 
+
 @frame_op
-def normalize_ab(frame: np.ndarray) -> np.ndarray:
+def normalize_a(frame: np.ndarray) -> np.ndarray:
     l, a, b = cv2.split(cv2.cvtColor(frame, cv2.COLOR_RGB2Lab))
     cv2.normalize(a, a, 1, 255, norm_type=cv2.NORM_MINMAX)
     cv2.normalize(b, b, 1, 255, norm_type=cv2.NORM_MINMAX)
     return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_Lab2RGB)
 
+@frame_op
+def dilate_erode(frame: np.ndarray, kernel_size: int = 7, iterations: int = 1) -> np.ndarray:
+    kernel = np.ones((kernel_size,kernel_size),np.uint8)
+    frame = cv2.dilate(frame,kernel,iterations = iterations)
+    frame = cv2.erode(frame,kernel,iterations = iterations)
+    return frame
 
 @frame_op
 def gblur(frame: np.ndarray) -> np.ndarray:
-    cv2.GaussianBlur(frame, (11, 11), 0, frame)
+    cv2.GaussianBlur(frame, (7, 7), 0, frame)
     return frame
 
 
@@ -213,21 +220,22 @@ def color_transfer_frame(frame: np.ndarray, preserve_paper: bool = False) -> np.
         The color-transferred image in RGB format (uint8).
     """
     lMeanSrc, lStdSrc, aMeanSrc, aStdSrc, bMeanSrc, bStdSrc = (
-        172.199,
-        27.70,
+        160.199,
+        26.70,
         127.00,
         10.023,
-        136.327,
+        130.327,
         15.125,
     )
 
-    lab = cv2.cvtColor(frame, cv2.COLOR_RGB2LAB).astype("float32")
-
+    lab = cv2.cvtColor(frame, cv2.COLOR_RGB2Lab).astype("float32")
     (l, a, b) = cv2.split(lab)
     # (lMeanTar, lStdTar) = (l.mean(), l.std())
     # (aMeanTar, aStdTar) = (a.mean(), a.std())
     # (bMeanTar, bStdTar) = (b.mean(), b.std())
 
+    # l = cv2.dilate(l, np.ones((3,3)))
+    l = cv2.GaussianBlur(l, (5, 5), 0)
     (lMeanTar, lStdTar) = cv2.meanStdDev(l)
     (aMeanTar, aStdTar) = cv2.meanStdDev(a)
     (bMeanTar, bStdTar) = cv2.meanStdDev(b)
@@ -254,19 +262,21 @@ def color_transfer_frame(frame: np.ndarray, preserve_paper: bool = False) -> np.
     b += bMeanSrc
 
     l = np.clip(l, 0, 255)
+    l = cv2.GaussianBlur(l, (5, 5), 0)
     a = np.clip(a, 0, 255)
     b = np.clip(b, 0, 255)
 
     transfer = cv2.merge([l, a, b])
-    transfer = cv2.cvtColor(transfer.astype(np.uint8), cv2.COLOR_LAB2RGB)
+    transfer = cv2.cvtColor(transfer.astype(np.uint8), cv2.COLOR_Lab2RGB)
 
     return transfer
 
 
 @frame_op
-def satboost(frame: np.ndarray, alpha=1.1) -> np.ndarray:
+def satboost(frame: np.ndarray, alpha=1.1, thresh=0.5) -> np.ndarray:
     h, s, v = cv2.split(cv2.cvtColor(frame, cv2.COLOR_RGB2HSV))
-    s = np.clip(s * alpha, 0, 255).astype(np.uint8)
+    if s.mean() / 255.0 > thresh:
+        s = np.clip(s * alpha, 0, 255).astype(np.uint8)
     # v = cv2.normalize(v, v, 0, 255, cv2.NORM_MINMAX)
     return cv2.cvtColor(cv2.merge([h, s, v]), cv2.COLOR_HSV2RGB)
 
