@@ -277,6 +277,28 @@ def color_transfer_frame(frame: np.ndarray, preserve_paper: bool = False) -> np.
 
 
 @frame_op
+def nlmeans_denoise(
+    frame: np.ndarray,
+    h: float = 5,
+    hColor: float = 10,
+    templateWindowSize: int = 7,
+    searchWindowSize: int = 21,
+) -> np.ndarray:
+    """
+    Non-local means denoising for colour frames (cv2.fastNlMeansDenoisingColored).
+
+    Args:
+        h: Filter strength for the luminance component.
+        hColor: Filter strength for the colour components.
+        templateWindowSize: Odd patch size used to compute weights.
+        searchWindowSize: Odd window size for the weighted average; cost scales linearly.
+    """
+    return cv2.fastNlMeansDenoisingColored(
+        frame, None, h, hColor, templateWindowSize, searchWindowSize
+    )
+
+
+@frame_op
 def satboost(frame: np.ndarray, alpha=1.1, thresh=0.5) -> np.ndarray:
     h, s, v = cv2.split(cv2.cvtColor(frame, cv2.COLOR_RGB2HSV))
     if s.mean() / 255.0 > thresh:
