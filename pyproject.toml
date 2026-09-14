@@ -8,8 +8,10 @@ dependencies = [
     "opencv-python==4.13.*",
     "numpy",
     "multiprocess",
+    "dejaq",
     "pytest",
 ]
 
 [project.optional-dependencies]
 ultralytics = ["ultralytics"]
+fastfifo = ["faster-fifo"]

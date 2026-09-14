@@ -1,13 +1,102 @@
+import copy
 import signal
 import threading
 import multiprocess
-from typing import Iterable, Callable, Optional, List
+from collections import deque
+from typing import Iterable, Iterator, Callable, Optional, List
 
 from os import cpu_count
 from concurrent.futures import ThreadPoolExecutor, Future, wait
 
+from .context import FrameContext
+from .queue import make_queue, put_sentinel
+
 _SENTINEL = "__DPTK_STREAM_SENTINEL__"
 _sink_executor = ThreadPoolExecutor(max_workers=cpu_count()-2)
+
+
+def _stage(op: Callable, it: Iterator[FrameContext]) -> Iterator[FrameContext]:
+    """
+    Wraps one op as a generator stage over the incoming frames.
+
+    The stage type is selected by the op's `__batch__` attribute: none for a
+    per-frame op, `"chunk"` for a batch op, `"window"` for a sliding-window op.
+    """
+    batch = getattr(op, "__batch__", None)
+    if batch is None:
+        return _map_stage(op, it)
+    if batch["mode"] == "chunk":
+        return _chunk_stage(op, it, batch["size"])
+    return _window_stage(op, it, batch["size"], batch.get("stride", 1), batch.get("pad"))
+
+
+def _map_stage(op: Callable, it: Iterator[FrameContext]) -> Iterator[FrameContext]:
+    """
+    Applies `op` to each frame. Drops frames for which `op` returns None.
+    """
+    for ctx in it:
+        result = op(ctx)
+        if result is not None:
+            yield result
+
+
+def _chunk_stage(
+    op: Callable, it: Iterator[FrameContext], size: int
+) -> Iterator[FrameContext]:
+    """
+    Collects `size` frames, then yields every frame returned by `op(list)`.
+    The last, shorter chunk is processed as well.
+    """
+    buf: List[FrameContext] = []
+    for ctx in it:
+        buf.append(ctx)
+        if len(buf) == size:
+            yield from op(buf)
+            buf = []
+    if buf:
+        yield from op(buf)
+
+
+def _window_stage(
+    op: Callable,
+    it: Iterator[FrameContext],
+    size: int,
+    stride: int,
+    pad: Optional[str],
+) -> Iterator[FrameContext]:
+    """
+    Slides a window of `size` frames over the stream and yields `op(list)` every
+    `stride` frames. With `pad="edge"` the first and last frame are repeated so
+    the output has as many frames as the input.
+    """
+    half = size // 2
+    window: deque = deque(maxlen=size)
+    count = 0
+
+    def emit():
+        nonlocal count
+        count += 1
+        if (count - 1) % stride == 0:
+            return op(list(window))
+        return None
+
+    for ctx in it:
+        if pad == "edge" and not window:
+            window.extend(copy.copy(ctx) for _ in range(half))
+        window.append(ctx)
+        if len(window) == size:
+            result = emit()
+            if result is not None:
+                yield result
+
+    if pad == "edge" and window:
+        last = window[-1]
+        for _ in range(half):
+            window.append(copy.copy(last))
+            if len(window) == size:
+                result = emit()
+                if result is not None:
+                    yield result
 
 class Stream:
     """
@@ -30,9 +119,9 @@ class Stream:
         self.ops = ops
         self.children: List["Stream"] = []
 
-        self._input_queue: multiprocess.Queue = multiprocess.Queue(maxsize=64)
+        self._input_queue = make_queue()
 
-        self._output_queues: List[multiprocess.Queue] = []
+        self._output_queues: list = []
         self._sink_futures: List[Future] = []
 
         self._worker: Optional[multiprocess.Process | threading.Thread] = None
@@ -40,10 +129,29 @@ class Stream:
 
         self._running = False
         self._stop = threading.Event()
+        self._finished = threading.Event()
+        self._attach_lock = threading.Lock()
 
         if self.parent:
-            self.parent._output_queues.append(self._input_queue)
+            self.parent._attach(self._input_queue)
             self.parent.children.append(self)
+
+    def _attach(self, queue) -> None:
+        """
+        Registers an output queue.
+
+        A root stream accepts new queues at any time. A finished stream sends
+        the sentinel to the new queue at once, so a late consumer still
+        terminates. A transform stream that is running cannot accept new queues,
+        because its worker process holds its own copy of the queue list.
+        """
+        with self._attach_lock:
+            worker = self._worker
+            if isinstance(worker, multiprocess.Process) and worker.is_alive():
+                raise RuntimeError("cannot attach to a running transform stream")
+            self._output_queues.append(queue)
+            if self._finished.is_set() or (worker is not None and not worker.is_alive()):
+                queue.put(_SENTINEL)
 
     def _ensure_running(self):
         """
@@ -82,8 +190,10 @@ class Stream:
                 for q in self._output_queues:
                     q.put(item)
         finally:
-            for q in self._output_queues:
-                q.put(_SENTINEL)
+            with self._attach_lock:
+                self._finished.set()
+                for q in self._output_queues:
+                    q.put(_SENTINEL)
 
     @staticmethod
     def _run_transform_process(
@@ -96,16 +206,12 @@ class Stream:
         # The parent process controls shutdown through the sentinel.
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         try:
-            for ctx in iter(in_queue.get, _SENTINEL):
-                processed_ctx = ctx
-                for op in ops:
-                    processed_ctx = op(processed_ctx)
-                    if processed_ctx is None:
-                        break
-
-                if processed_ctx is not None:
-                    for q in out_queues:
-                        q.put(processed_ctx)
+            it: Iterator[FrameContext] = iter(in_queue.get, _SENTINEL)
+            for op in ops:
+                it = _stage(op, it)
+            for ctx in it:
+                for q in out_queues:
+                    q.put(ctx)
         finally:
             for q in out_queues:
                 q.put(_SENTINEL)
@@ -131,8 +237,8 @@ class Stream:
         """
         Attaches a final consumption function to the stream and initiates execution.
         """
-        sink_queue = multiprocess.Queue(maxsize=64)
-        self._output_queues.append(sink_queue)
+        sink_queue = make_queue()
+        self._attach(sink_queue)
 
         queue_iterator = iter(sink_queue.get, _SENTINEL)
         self._sink_futures.append(_sink_executor.submit(sink, queue_iterator))
@@ -161,11 +267,7 @@ class Stream:
         """
         self._stop.set()
         for q in self._output_queues:
-            try:
-                q.put(_SENTINEL, timeout=1.0)
-            except Exception:
-                pass  # queue is full; join() terminates the worker instead
-            q.cancel_join_thread()
+            put_sentinel(q, _SENTINEL)  # a full queue is skipped; join() terminates the worker
 
     def join(self):
         """

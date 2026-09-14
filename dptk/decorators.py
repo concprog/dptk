@@ -1,5 +1,6 @@
 from typing import Callable, Optional, Any
 import numpy as np
+import copy
 import functools
 import inspect
 
@@ -34,6 +35,103 @@ def frame_op(
     wrapper.__wrapped__ = func
 
     return wrapper
+
+
+def batch_op(size: int) -> Callable[[Callable], Callable]:
+    """
+    Marks a function as a batch frame operation.
+
+    The decorated function receives a list of `size` numpy arrays and returns a
+    list of the same length. A `None` entry keeps the corresponding input frame.
+    The runner collects `size` frames before each call and passes the remaining
+    frames as a shorter list at the end of the stream.
+
+    Args:
+        size: Number of frames per call.
+
+    Returns:
+        A decorator producing a wrapper that accepts and returns a list of FrameContext.
+    """
+
+    def decorator(func: Callable[..., Optional[list]]) -> Callable:
+        @functools.wraps(func)
+        def wrapper(ctxs: list[FrameContext]) -> list[FrameContext]:
+            _apply_batch_result(ctxs, func([c.frame for c in ctxs]))
+            return ctxs
+
+        wrapper.__transform__ = True
+        wrapper.__wrapped__ = func
+        wrapper.__batch__ = {"mode": "chunk", "size": size}
+        return wrapper
+
+    return decorator
+
+
+def window_op(
+    size: int, stride: int = 1, pad: Optional[str] = "edge"
+) -> Callable[[Callable], Callable]:
+    """
+    Marks a function as a sliding-window frame operation.
+
+    The decorated function receives a list of `size` numpy arrays and the index
+    of the centre frame, and returns the new frame for that centre. The runner
+    emits one FrameContext per `stride` input frames.
+
+    Args:
+        size: Number of frames in the window. Must be odd.
+        stride: Number of input frames between two outputs.
+        pad: `"edge"` repeats the first and last frame so the output has as many
+            frames as the input. `None` emits only full windows.
+
+    Returns:
+        A decorator producing a wrapper that accepts a list of FrameContext and
+        returns the centre FrameContext.
+    """
+    if size % 2 == 0:
+        raise ValueError("window size must be odd")
+
+    def decorator(func: Callable[..., Optional[np.ndarray]]) -> Callable:
+        @functools.wraps(func)
+        def wrapper(ctxs: list[FrameContext]) -> FrameContext:
+            return _apply_window_result(
+                ctxs, func([c.frame for c in ctxs], len(ctxs) // 2)
+            )
+
+        wrapper.__transform__ = True
+        wrapper.__wrapped__ = func
+        wrapper.__batch__ = {"mode": "window", "size": size, "stride": stride, "pad": pad}
+        return wrapper
+
+    return decorator
+
+
+def _apply_batch_result(ctxs: list[FrameContext], frames: Optional[list]) -> None:
+    """
+    Writes the frames returned by a batch function back onto their contexts.
+    """
+    if frames is None:
+        return
+    if len(frames) != len(ctxs):
+        raise ValueError(
+            f"batch op returned {len(frames)} frames for {len(ctxs)} inputs"
+        )
+    for ctx, frame in zip(ctxs, frames):
+        if frame is not None:
+            ctx.frame = frame
+
+
+def _apply_window_result(
+    ctxs: list[FrameContext], frame: Optional[np.ndarray]
+) -> FrameContext:
+    """
+    Returns a copy of the centre context carrying the frame returned by a window
+    function. The contexts in the window are left unchanged, because later
+    windows still read them.
+    """
+    centre = copy.copy(ctxs[len(ctxs) // 2])
+    if frame is not None:
+        centre.frame = frame
+    return centre
 
 
 def metadata_op(func: Callable[[dict], dict]) -> Callable[[FrameContext], FrameContext]:
@@ -81,17 +179,42 @@ def configure(
 
     original_func = op.__wrapped__
     sig = inspect.signature(original_func)
+    batch = getattr(op, "__batch__", None)
 
     try:
-        sig.bind(None, *args, **kwargs)
+        if batch and batch["mode"] == "window":
+            sig.bind(None, None, *args, **kwargs)
+        else:
+            sig.bind(None, *args, **kwargs)
     except TypeError as e:
         raise TypeError(f"Invalid configuration for {op.__name__}: {e}")
 
-    def configured_execution(ctx: FrameContext) -> FrameContext:
-        result = original_func(ctx.frame, *args, **kwargs)
-        if result is not None:
-            ctx.frame = result
-        return ctx
+    if batch is None:
+
+        def configured_execution(ctx: FrameContext) -> FrameContext:
+            result = original_func(ctx.frame, *args, **kwargs)
+            if result is not None:
+                ctx.frame = result
+            return ctx
+
+    elif batch["mode"] == "chunk":
+
+        def configured_execution(ctxs: list[FrameContext]) -> list[FrameContext]:
+            _apply_batch_result(
+                ctxs, original_func([c.frame for c in ctxs], *args, **kwargs)
+            )
+            return ctxs
+
+    else:
+
+        def configured_execution(ctxs: list[FrameContext]) -> FrameContext:
+            return _apply_window_result(
+                ctxs,
+                original_func([c.frame for c in ctxs], len(ctxs) // 2, *args, **kwargs),
+            )
+
+    if batch is not None:
+        configured_execution.__batch__ = batch
 
     config_desc = ", ".join(
         [repr(a) for a in args] + [f"{k}={v!r}" for k, v in kwargs.items()]
