@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import patch, MagicMock
 from dptk.stream import Stream, wait_till_complete
 

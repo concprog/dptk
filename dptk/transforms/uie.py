@@ -24,9 +24,9 @@ def CLAHE(
     c = cv2.createCLAHE(clipLimit=clipLimit, tileGridSize=tileGridSize)
     if len(frame.shape) == 3:
         lab = cv2.cvtColor(frame, cv2.COLOR_RGB2LAB)
-        l, a, b = cv2.split(lab)
-        l = c.apply(l)
-        return cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2RGB)
+        L, a, b = cv2.split(lab)
+        L = c.apply(L)
+        return cv2.cvtColor(cv2.merge((L, a, b)), cv2.COLOR_LAB2RGB)
     else:
         return c.apply(frame)
 

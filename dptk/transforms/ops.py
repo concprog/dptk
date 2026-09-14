@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from typing import Callable, Optional, Tuple, List
+from typing import Callable, Optional, Tuple
 from ..context import FrameContext
 from ..decorators import frame_op
 
@@ -170,17 +170,21 @@ def normalize_intensity(frame: np.ndarray) -> np.ndarray:
 
 @frame_op
 def normalize_a(frame: np.ndarray) -> np.ndarray:
-    l, a, b = cv2.split(cv2.cvtColor(frame, cv2.COLOR_RGB2Lab))
+    L, a, b = cv2.split(cv2.cvtColor(frame, cv2.COLOR_RGB2Lab))
     cv2.normalize(a, a, 1, 255, norm_type=cv2.NORM_MINMAX)
     cv2.normalize(b, b, 1, 255, norm_type=cv2.NORM_MINMAX)
-    return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_Lab2RGB)
+    return cv2.cvtColor(cv2.merge([L, a, b]), cv2.COLOR_Lab2RGB)
+
 
 @frame_op
-def dilate_erode(frame: np.ndarray, kernel_size: int = 7, iterations: int = 1) -> np.ndarray:
-    kernel = np.ones((kernel_size,kernel_size),np.uint8)
-    frame = cv2.dilate(frame,kernel,iterations = iterations)
-    frame = cv2.erode(frame,kernel,iterations = iterations)
+def dilate_erode(
+    frame: np.ndarray, kernel_size: int = 7, iterations: int = 1
+) -> np.ndarray:
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    frame = cv2.dilate(frame, kernel, iterations=iterations)
+    frame = cv2.erode(frame, kernel, iterations=iterations)
     return frame
+
 
 @frame_op
 def gblur(frame: np.ndarray) -> np.ndarray:
@@ -222,51 +226,51 @@ def color_transfer_frame(frame: np.ndarray, preserve_paper: bool = False) -> np.
     lMeanSrc, lStdSrc, aMeanSrc, aStdSrc, bMeanSrc, bStdSrc = (
         160.199,
         26.70,
-        127.00,
-        10.023,
-        130.327,
+        127.60,
+        9.023,
+        131.327,
         15.125,
     )
 
     lab = cv2.cvtColor(frame, cv2.COLOR_RGB2Lab).astype("float32")
-    (l, a, b) = cv2.split(lab)
-    # (lMeanTar, lStdTar) = (l.mean(), l.std())
+    (L, a, b) = cv2.split(lab)
+    # (lMeanTar, lStdTar) = (L.mean(), L.std())
     # (aMeanTar, aStdTar) = (a.mean(), a.std())
     # (bMeanTar, bStdTar) = (b.mean(), b.std())
 
-    # l = cv2.dilate(l, np.ones((3,3)))
-    l = cv2.GaussianBlur(l, (5, 5), 0)
-    (lMeanTar, lStdTar) = cv2.meanStdDev(l)
+    # L = cv2.dilate(L, np.ones((3,3)))
+    L = cv2.GaussianBlur(L, (5, 5), 0)
+    (lMeanTar, lStdTar) = cv2.meanStdDev(L)
     (aMeanTar, aStdTar) = cv2.meanStdDev(a)
     (bMeanTar, bStdTar) = cv2.meanStdDev(b)
 
     # Subtract target means
-    l -= lMeanTar
+    L -= lMeanTar
     a -= aMeanTar
     b -= bMeanTar
 
     # Scale by standard deviations
     if preserve_paper:
         # Paper method: scale by (target_std / source_std)
-        l = (lStdTar / lStdSrc) * l
+        L = (lStdTar / lStdSrc) * L
         a = (aStdTar / aStdSrc) * a
         b = (bStdTar / bStdSrc) * b
     else:
         # Reciprocal method: scale by (source_std / target_std)
-        l = (lStdSrc / lStdTar) * l
+        L = (lStdSrc / lStdTar) * L
         a = (aStdSrc / aStdTar) * a
         b = (bStdSrc / bStdTar) * b
 
-    l += lMeanSrc
+    L += lMeanSrc
     a += aMeanSrc
     b += bMeanSrc
 
-    l = np.clip(l, 0, 255)
-    l = cv2.GaussianBlur(l, (5, 5), 0)
+    L = np.clip(L, 0, 255)
+    L = cv2.GaussianBlur(L, (5, 5), 0)
     a = np.clip(a, 0, 255)
     b = np.clip(b, 0, 255)
 
-    transfer = cv2.merge([l, a, b])
+    transfer = cv2.merge([L, a, b])
     transfer = cv2.cvtColor(transfer.astype(np.uint8), cv2.COLOR_Lab2RGB)
 
     return transfer

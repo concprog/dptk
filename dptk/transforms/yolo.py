@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
 from ..context import FrameContext
-from typing import Optional, List, Callable
+from typing import Callable
 from ultralytics import YOLO
 
 

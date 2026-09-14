@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 from dptk.context import FrameContext
 from dptk.decorators import frame_op, configure
-from dptk.stream import Stream
+from dptk.stream import Stream, _SENTINEL
 
 
 def _run_sync(stream: Stream) -> list:
@@ -23,10 +23,10 @@ def _run_sync(stream: Stream) -> list:
     time.sleep(0.1)
 
     if getattr(stream, "_input_queue", None) is not None:
-        stream._input_queue.put(dptk.decorators._SENTINEL)
+        stream._input_queue.put(_SENTINEL)
     else:
         for q in stream._output_queues:
-            q.put(dptk.decorators._SENTINEL)
+            q.put(_SENTINEL)
 
     while stream._worker and stream._worker.is_alive():
         time.sleep(0.01)

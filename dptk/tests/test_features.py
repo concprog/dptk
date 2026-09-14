@@ -1,6 +1,5 @@
 import pytest
 import numpy as np
-import cv2
 from dptk.context import FrameContext
 from dptk.transforms.features import detect_features, match_features
 

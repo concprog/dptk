@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from ..context import FrameContext
-from typing import List, Tuple, Optional, Callable, Dict, Any
+from typing import Tuple, Optional, Callable
 
 
 def order_points(pts: np.ndarray) -> np.ndarray:

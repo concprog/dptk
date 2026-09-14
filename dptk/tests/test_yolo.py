@@ -2,7 +2,6 @@ import pytest
 import numpy as np
 from dptk.context import FrameContext
 from dptk.transforms.yolo import crop_to_class, draw_boxes
-from dptk.decorators import configure
 
 
 class MockTensor:

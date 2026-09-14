@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 from ..context import FrameContext
-from typing import Optional, List, Any
 
 
 def detect_features(

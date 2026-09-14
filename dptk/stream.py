@@ -1,6 +1,6 @@
 import threading
 import multiprocess
-from typing import Iterable, Callable, Iterator, Optional, List
+from typing import Iterable, Callable, Optional, List
 
 from os import cpu_count
 from concurrent.futures import ThreadPoolExecutor
@@ -112,10 +112,10 @@ class Stream:
         Creates a new child stream that filters out frames failing the predicate.
         If no predicate is provided, filters out None objects.
         """
-        if predicate is None:
-            op = lambda ctx: ctx if ctx is not None else None
-        else:
-            op = lambda ctx: ctx if predicate(ctx) else None
+        def op(ctx):
+            if predicate is None:
+                return ctx
+            return ctx if predicate(ctx) else None
         return self.pipe(op)
 
     def subscribe(self, sink: Callable) -> None:

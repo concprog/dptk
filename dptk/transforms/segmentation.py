@@ -75,7 +75,6 @@ def farneback_seg(
             return ctx
             
         # Compute dense optical flow
-        flow_input = np.zeros_like(gray, dtype=np.float32) # Dummy for type checker if needed, but cv2 parses None fine at runtime
         flow = cv2.calcOpticalFlowFarneback(
             state["prev_gray"], gray, None, # type: ignore
             pyr_scale, levels, winsize, iterations, poly_n, poly_sigma, flags
