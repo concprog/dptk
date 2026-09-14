@@ -10,7 +10,11 @@ from dptk.transforms.ops import (
     canny,
     find_contours,
     analyze_contours,
+    nlmeans_denoise,
+    nlmeans_denoise_multi,
 )
+from dptk.decorators import configure
+from dptk.stream import Stream, wait_till_complete
 
 
 @pytest.fixture
@@ -83,3 +87,32 @@ def test_contours_pipeline(ctx):
     assert len(stats) > 0
     areas = [s["area"] for s in stats]
     assert any(a > 2000 for a in areas)
+
+
+def _noisy_frames(n):
+    rng = np.random.default_rng(0)
+    return [
+        FrameContext(
+            frame=rng.integers(0, 255, (32, 32, 3), dtype=np.uint8),
+            index=i,
+            timestamp=float(i),
+        )
+        for i in range(n)
+    ]
+
+
+def test_nlmeans_denoise(dummy_frame):
+    ctx = FrameContext(frame=dummy_frame, index=0, timestamp=0.0)
+    res = configure(nlmeans_denoise, h=3, hColor=3)(ctx)
+    assert res.frame.shape == dummy_frame.shape
+    assert res.frame.dtype == np.uint8
+
+
+def test_nlmeans_denoise_multi_keeps_frame_count():
+    out = []
+    stream = Stream(_noisy_frames(6)).pipe(configure(nlmeans_denoise_multi, h=3, hColor=3))
+    stream.subscribe(lambda it: out.extend(it))
+    wait_till_complete(stream)
+
+    assert [c.index for c in out] == list(range(6))
+    assert all(c.frame.shape == (32, 32, 3) and c.frame.dtype == np.uint8 for c in out)

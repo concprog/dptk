@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from typing import Callable, Optional, Tuple
 from ..context import FrameContext
-from ..decorators import frame_op
+from ..decorators import frame_op, window_op
 
 
 def canny(
@@ -295,6 +295,32 @@ def nlmeans_denoise(
     """
     return cv2.fastNlMeansDenoisingColored(
         frame, None, h, hColor, templateWindowSize, searchWindowSize
+    )
+
+
+@window_op(size=3)
+def nlmeans_denoise_multi(
+    frames: list,
+    centre: int,
+    h: float = 5,
+    hColor: float = 10,
+    templateWindowSize: int = 7,
+    searchWindowSize: int = 21,
+) -> np.ndarray:
+    """
+    Temporal non-local means denoising (cv2.fastNlMeansDenoisingColoredMulti).
+
+    Denoises the centre frame using the neighbouring frames of the window as
+    extra samples. The window is 3 frames wide, so output lags input by one frame.
+
+    Args:
+        h: Filter strength for the luminance component.
+        hColor: Filter strength for the colour components.
+        templateWindowSize: Odd patch size used to compute weights.
+        searchWindowSize: Odd window size for the weighted average; cost scales linearly.
+    """
+    return cv2.fastNlMeansDenoisingColoredMulti(
+        frames, centre, len(frames), None, h, hColor, templateWindowSize, searchWindowSize
     )
 
 

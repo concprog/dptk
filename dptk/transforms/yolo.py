@@ -13,7 +13,8 @@ def yolo_detect(
     device: str | None = None,
     verbose: bool = False,
     result_key: str = "yolo",
-) -> Callable[[FrameContext], FrameContext]:
+    batch: int = 1,
+) -> Callable:
     """
     Factory that creates a YOLO detection transform.
 
@@ -25,6 +26,8 @@ def yolo_detect(
         device: Device to run on ('cpu', '0', '1', etc.).
         verbose: Show inference logs.
         result_key: Key to store results in ctx.metadata.
+        batch: Frames per inference call. With `batch > 1` the transform is a
+            batch op and the model runs one forward pass per `batch` frames.
 
     Returns:
         Transform function processing incoming FrameContext structures.
@@ -40,38 +43,52 @@ def yolo_detect(
         "verbose": verbose,
     }
 
-    def transform(ctx: FrameContext) -> FrameContext:
+    def annotate(ctx: FrameContext, result) -> None:
         """
-        Executes YOLO inference against a pre-warmed context object structure.
+        Stores one YOLO result and its flattened detections on a context.
         """
-        results = model(ctx.frame, **model_args)
-
-        ctx.metadata[result_key] = results
+        ctx.metadata[result_key] = [result]
 
         detections = []
-        for r in results:
-            boxes = r.boxes
-            if boxes is not None:
-                for box in boxes:
-                    detections.append(
-                        {
-                            "class_id": int(box.cls),
-                            "class_name": r.names[int(box.cls)],
-                            "confidence": float(box.conf),
-                            "bbox": box.xyxy[0].tolist(),
-                            "bbox_norm": box.xywhn[0].tolist(),
-                        }
-                    )
+        boxes = result.boxes
+        if boxes is not None:
+            for box in boxes:
+                detections.append(
+                    {
+                        "class_id": int(box.cls),
+                        "class_name": result.names[int(box.cls)],
+                        "confidence": float(box.conf),
+                        "bbox": box.xyxy[0].tolist(),
+                        "bbox_norm": box.xywhn[0].tolist(),
+                    }
+                )
 
         ctx.metadata[f"{result_key}_detections"] = detections
         ctx.metadata[f"{result_key}_count"] = len(detections)
 
+    def transform(ctx: FrameContext) -> FrameContext:
+        """
+        Executes YOLO inference on one frame.
+        """
+        annotate(ctx, model(ctx.frame, **model_args)[0])
         return ctx
 
-    transform.model = model
-    transform.model_path = model_path
+    def transform_batch(ctxs: list[FrameContext]) -> list[FrameContext]:
+        """
+        Executes YOLO inference on a list of frames in one forward pass.
+        """
+        results = model([c.frame for c in ctxs], **model_args)
+        for ctx, result in zip(ctxs, results):
+            annotate(ctx, result)
+        return ctxs
 
-    return transform
+    op = transform_batch if batch > 1 else transform
+    if batch > 1:
+        op.__batch__ = {"mode": "chunk", "size": batch}
+    op.model = model
+    op.model_path = model_path
+
+    return op
 
 
 def crop_to_class(

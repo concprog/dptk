@@ -65,6 +65,37 @@ def grayworld(frame: np.ndarray, alpha: float = 1.1) -> np.ndarray:
     return cv2.cvtColor(result, cv2.COLOR_LAB2RGB)
 ```
 
+#### Batch and window ops
+Some functions accept several frames at once: a YOLO model runs one forward pass for a list of images, and `cv2.fastNlMeansDenoisingColoredMulti` denoises a frame with its neighbours. Two decorators declare that shape. The stream collects frames for the op inside the worker process, so no extra copies are made.
+
+*   **`@batch_op(size)`** — the function receives a list of `size` frames and returns a list of the same length. The last, shorter batch at the end of a stream is processed too.
+*   **`@window_op(size, stride=1, pad="edge")`** — the function receives a sliding window of `size` frames (odd) and the index of the centre frame, and returns the new centre frame. With `pad="edge"` the output has as many frames as the input; with `pad=None` only full windows are emitted.
+
+```python
+from dptk.decorators import batch_op, window_op
+
+@batch_op(size=8)
+def detect(frames: list[np.ndarray]) -> list[np.ndarray]:
+    return [draw(f, model(frames)[i]) for i, f in enumerate(frames)]
+
+@window_op(size=3)
+def denoise(frames: list[np.ndarray], centre: int) -> np.ndarray:
+    return cv2.fastNlMeansDenoisingColoredMulti(frames, centre, len(frames), None, 5, 10)
+```
+
+`configure()` works on both. `yolo_detect(..., batch=8)` and `ops.nlmeans_denoise_multi` are ready-made examples.
+
+#### Queue transport
+Frames move between pipes through a queue selected by `DPTK_TRANSPORT`:
+
+| value | backend | notes |
+|---|---|---|
+| `dejaq` (default) | shared-memory ring buffer | pickle-5 out-of-band buffers, one copy per hop |
+| `fifo` | faster-fifo | needs `pip install dptk[fastfifo]` |
+| `mp` | `multiprocess.Queue` | pipe-based, slowest for large frames |
+
+`DPTK_QUEUE_BYTES` sets the ring size for the shared-memory backends (default 64 MB). Every pipe and every sink owns one ring in `/dev/shm`, so keep the total below the size of that filesystem.
+
 ## Usage Example
 
 The following example demonstrates a parallel pipeline setup. It processes a video stream for image enhancement (`pipeline`) while simultaneously running object detection (`gate`) on the same source stream.
@@ -157,6 +188,7 @@ All transforms implement `Callable[[FrameContext], FrameContext]`.
 *   `rotate(angle)`: Rotates frame.
 *   `canny(t1, t2)`: Edge detection.
 *   `find_contours`, `draw_contours`, `analyze_contours`: Contour pipeline.
+*   `nlmeans_denoise`, `nlmeans_denoise_multi`: Non-local means denoising, single-frame and temporal (window of 3).
 
 ### `dptk.transforms.transforms` (Geometric)
 *   `four_point_transform(pts | pts_key)`: Perspective crop.

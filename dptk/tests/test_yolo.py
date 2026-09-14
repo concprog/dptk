@@ -1,7 +1,9 @@
 import pytest
 import numpy as np
 from dptk.context import FrameContext
-from dptk.transforms.yolo import crop_to_class, draw_boxes
+
+pytest.importorskip("ultralytics")
+from dptk.transforms.yolo import crop_to_class, draw_boxes  # noqa: E402
 
 
 class MockTensor:
@@ -118,3 +120,48 @@ def test_draw_boxes(mock_yolo_ctx):
     op = draw_boxes()
     res = op(mock_yolo_ctx)
     assert np.any(res.frame > 0)
+
+
+class MockModel:
+    """Stands in for ultralytics.YOLO: returns one empty result per input frame."""
+
+    def __init__(self, path):
+        self.calls = []
+
+    def __call__(self, source, **kwargs):
+        frames = source if isinstance(source, list) else [source]
+        self.calls.append(len(frames))
+        return [MockResult([], {}) for _ in frames]
+
+
+def _ctxs(n):
+    return [
+        FrameContext(frame=np.zeros((4, 4, 3), dtype=np.uint8), index=i, timestamp=0.0)
+        for i in range(n)
+    ]
+
+
+def test_yolo_detect_single(monkeypatch):
+    monkeypatch.setattr("dptk.transforms.yolo.YOLO", MockModel)
+    from dptk.transforms.yolo import yolo_detect
+
+    op = yolo_detect("x.pt")
+    assert not hasattr(op, "__batch__")
+
+    ctx = op(_ctxs(1)[0])
+    assert ctx.metadata["yolo_count"] == 0
+    assert len(ctx.metadata["yolo"]) == 1
+    assert op.model.calls == [1]
+
+
+def test_yolo_detect_batch(monkeypatch):
+    monkeypatch.setattr("dptk.transforms.yolo.YOLO", MockModel)
+    from dptk.transforms.yolo import yolo_detect
+
+    op = yolo_detect("x.pt", batch=4)
+    assert op.__batch__ == {"mode": "chunk", "size": 4}
+
+    ctxs = op(_ctxs(3))
+    assert [c.metadata["yolo_count"] for c in ctxs] == [0, 0, 0]
+    assert all(len(c.metadata["yolo"]) == 1 for c in ctxs)
+    assert op.model.calls == [3]
