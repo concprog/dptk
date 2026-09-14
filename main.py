@@ -12,6 +12,7 @@ from dptk.transforms.ops import (
     remove_color_cast,
     color_transfer_frame,
     analyze_contours,
+    nlmeans_denoise,
 )
 from dptk.transforms.segmentation import farneback_seg
 from dptk.transforms.uie import (
@@ -27,17 +28,17 @@ from dptk import configure, wait_till_complete
 
 
 def main():
-    # stream = VideoSource("/home/ssen4/Projects/newcontrol/input_video_sauvc.mp4")
-    stream = VideoSource("rosbagg1.mp4")
+    stream = VideoSource("test2_20260909_032351_detected.mp4")
     # stream = FolderSource(
     #     "/home/ssen4/Projects/newcontrol/datasets/usefuleshit/dnt_sauvc_yolo_complete_anno/images/train"
     # )
 
     pipeline = stream.pipe(
         # remove_color_cast,
+        configure(nlmeans_denoise, h=5, hColor=10, searchWindowSize=13),
         normalize,
-        color_transfer_frame,
-        normalize,
+        # color_transfer_frame,
+        # normalize,
         configure(CLAHE, clipLimit=1.3, tileGridSize=(2, 2)),
         # configure(satboost, 0.7),
         # gamma0,
