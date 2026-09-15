@@ -68,7 +68,10 @@ def batch_op(size: int) -> Callable[[Callable], Callable]:
 
 
 def window_op(
-    size: int, stride: int = 1, pad: Optional[str] = "edge"
+    size: int,
+    stride: int = 1,
+    pad: Optional[str] = "edge",
+    centre: Optional[int] = None,
 ) -> Callable[[Callable], Callable]:
     """
     Marks a function as a sliding-window frame operation.
@@ -78,28 +81,41 @@ def window_op(
     emits one FrameContext per `stride` input frames.
 
     Args:
-        size: Number of frames in the window. Must be odd.
+        size: Number of frames in the window. Must be odd unless `centre` is given.
         stride: Number of input frames between two outputs.
         pad: `"edge"` repeats the first and last frame so the output has as many
             frames as the input. `None` emits only full windows.
+        centre: Index of the output frame within the window. Defaults to the
+            middle frame, which lags the input by `size // 2` frames. `size - 1`
+            makes the window causal: only past frames are seen and there is no lag.
 
     Returns:
         A decorator producing a wrapper that accepts a list of FrameContext and
         returns the centre FrameContext.
     """
-    if size % 2 == 0:
-        raise ValueError("window size must be odd")
+    if centre is None:
+        if size % 2 == 0:
+            raise ValueError("window size must be odd unless centre is given")
+        centre = size // 2
+    if not 0 <= centre < size:
+        raise ValueError(f"centre {centre} is outside the window of size {size}")
 
     def decorator(func: Callable[..., Optional[np.ndarray]]) -> Callable:
         @functools.wraps(func)
         def wrapper(ctxs: list[FrameContext]) -> FrameContext:
             return _apply_window_result(
-                ctxs, func([c.frame for c in ctxs], len(ctxs) // 2)
+                ctxs, func([c.frame for c in ctxs], centre), centre
             )
 
         wrapper.__transform__ = True
         wrapper.__wrapped__ = func
-        wrapper.__batch__ = {"mode": "window", "size": size, "stride": stride, "pad": pad}
+        wrapper.__batch__ = {
+            "mode": "window",
+            "size": size,
+            "stride": stride,
+            "pad": pad,
+            "centre": centre,
+        }
         return wrapper
 
     return decorator
@@ -121,17 +137,17 @@ def _apply_batch_result(ctxs: list[FrameContext], frames: Optional[list]) -> Non
 
 
 def _apply_window_result(
-    ctxs: list[FrameContext], frame: Optional[np.ndarray]
+    ctxs: list[FrameContext], frame: Optional[np.ndarray], centre: int
 ) -> FrameContext:
     """
-    Returns a copy of the centre context carrying the frame returned by a window
-    function. The contexts in the window are left unchanged, because later
-    windows still read them.
+    Returns a copy of the context at `centre` carrying the frame returned by a
+    window function. The contexts in the window are left unchanged, because
+    later windows still read them.
     """
-    centre = copy.copy(ctxs[len(ctxs) // 2])
+    out = copy.copy(ctxs[centre])
     if frame is not None:
-        centre.frame = frame
-    return centre
+        out.frame = frame
+    return out
 
 
 def metadata_op(func: Callable[[dict], dict]) -> Callable[[FrameContext], FrameContext]:
@@ -207,10 +223,13 @@ def configure(
 
     else:
 
+        centre = batch["centre"]
+
         def configured_execution(ctxs: list[FrameContext]) -> FrameContext:
             return _apply_window_result(
                 ctxs,
-                original_func([c.frame for c in ctxs], len(ctxs) // 2, *args, **kwargs),
+                original_func([c.frame for c in ctxs], centre, *args, **kwargs),
+                centre,
             )
 
     if batch is not None:

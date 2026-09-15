@@ -69,7 +69,7 @@ def grayworld(frame: np.ndarray, alpha: float = 1.1) -> np.ndarray:
 Some functions accept several frames at once: a YOLO model runs one forward pass for a list of images, and `cv2.fastNlMeansDenoisingColoredMulti` denoises a frame with its neighbours. Two decorators declare that shape. The stream collects frames for the op inside the worker process, so no extra copies are made.
 
 *   **`@batch_op(size)`** — the function receives a list of `size` frames and returns a list of the same length. The last, shorter batch at the end of a stream is processed too.
-*   **`@window_op(size, stride=1, pad="edge")`** — the function receives a sliding window of `size` frames (odd) and the index of the centre frame, and returns the new centre frame. With `pad="edge"` the output has as many frames as the input; with `pad=None` only full windows are emitted.
+*   **`@window_op(size, stride=1, pad="edge", centre=None)`** — the function receives a sliding window of `size` frames and the index of the centre frame, and returns the new centre frame. With `pad="edge"` the output has as many frames as the input; with `pad=None` only full windows are emitted. `centre` defaults to the middle frame (`size` must then be odd) and the output lags the input by `size // 2` frames; `centre=size - 1` gives a causal window over past frames only, with no lag, for live input.
 
 ```python
 from dptk.decorators import batch_op, window_op

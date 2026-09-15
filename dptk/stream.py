@@ -27,7 +27,9 @@ def _stage(op: Callable, it: Iterator[FrameContext]) -> Iterator[FrameContext]:
         return _map_stage(op, it)
     if batch["mode"] == "chunk":
         return _chunk_stage(op, it, batch["size"])
-    return _window_stage(op, it, batch["size"], batch.get("stride", 1), batch.get("pad"))
+    return _window_stage(
+        op, it, batch["size"], batch.get("stride", 1), batch.get("pad"), batch["centre"]
+    )
 
 
 def _map_stage(op: Callable, it: Iterator[FrameContext]) -> Iterator[FrameContext]:
@@ -63,13 +65,15 @@ def _window_stage(
     size: int,
     stride: int,
     pad: Optional[str],
+    centre: int,
 ) -> Iterator[FrameContext]:
     """
     Slides a window of `size` frames over the stream and yields `op(list)` every
-    `stride` frames. With `pad="edge"` the first and last frame are repeated so
-    the output has as many frames as the input.
+    `stride` frames. With `pad="edge"` the first frame is repeated `centre`
+    times and the last frame `size - 1 - centre` times so the output has as
+    many frames as the input.
     """
-    half = size // 2
+    lead, trail = centre, size - 1 - centre
     window: deque = deque(maxlen=size)
     count = 0
 
@@ -82,7 +86,7 @@ def _window_stage(
 
     for ctx in it:
         if pad == "edge" and not window:
-            window.extend(copy.copy(ctx) for _ in range(half))
+            window.extend(copy.copy(ctx) for _ in range(lead))
         window.append(ctx)
         if len(window) == size:
             result = emit()
@@ -91,7 +95,7 @@ def _window_stage(
 
     if pad == "edge" and window:
         last = window[-1]
-        for _ in range(half):
+        for _ in range(trail):
             window.append(copy.copy(last))
             if len(window) == size:
                 result = emit()

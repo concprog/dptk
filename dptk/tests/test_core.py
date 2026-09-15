@@ -223,6 +223,32 @@ def test_window_op_short_stream():
 def test_window_op_requires_odd_size():
     with pytest.raises(ValueError):
         window_op(size=4)(lambda frames, centre: None)
+    with pytest.raises(ValueError):
+        window_op(size=4, centre=4)(lambda frames, centre: None)
+
+
+def test_window_op_causal_centre():
+    @window_op(size=3, centre=2)
+    def past_sum(frames, centre):
+        return sum(int(f[0, 0]) for f in frames) * np.ones_like(frames[centre])
+
+    assert past_sum.__batch__["centre"] == 2
+    results = _run_sync(Stream(_frames(6)).pipe(past_sum))
+
+    assert [c.index for c in results] == list(range(6))
+    # causal: frame 0 sees [0, 0, 0] -> 0; frame 4 sees [2, 3, 4] -> 9; no trailing pad
+    assert int(results[0].frame[0, 0]) == 0
+    assert int(results[4].frame[0, 0]) == 9
+    assert int(results[5].frame[0, 0]) == 12
+
+
+def test_window_op_causal_no_pad():
+    @window_op(size=4, centre=3, pad=None)
+    def identity(frames, centre):
+        return frames[centre]
+
+    results = _run_sync(Stream(_frames(6)).pipe(identity))
+    assert [c.index for c in results] == list(range(3, 6))
 
 
 def test_configure_batch_op():
