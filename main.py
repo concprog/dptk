@@ -13,6 +13,9 @@ from dptk.transforms.ops import (
     color_transfer_frame,
     analyze_contours,
     nlmeans_denoise,
+    nlmeans_denoise_multi,
+    remove_particles,
+    remove_specks,
 )
 from dptk.transforms.segmentation import farneback_seg
 from dptk.transforms.uie import (
@@ -35,7 +38,8 @@ def main():
 
     pipeline = stream.pipe(
         # remove_color_cast,
-        configure(nlmeans_denoise, h=5, hColor=10, searchWindowSize=13),
+        configure(remove_particles, fill="median"),
+        configure(nlmeans_denoise_multi, h=5, hColor=10, searchWindowSize=13),
         normalize,
         # color_transfer_frame,
         # normalize,

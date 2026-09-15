@@ -324,6 +324,193 @@ def nlmeans_denoise_multi(
     )
 
 
+_dis_cache: dict = {}
+
+
+def _dis_flow(preset: int) -> "cv2.DISOpticalFlow":
+    """Returns a shared DIS optical flow instance for the given preset."""
+    if preset not in _dis_cache:
+        _dis_cache[preset] = cv2.DISOpticalFlow_create(preset)
+    return _dis_cache[preset]
+
+
+def _mesh(shape: Tuple[int, int]) -> Tuple[np.ndarray, np.ndarray]:
+    """Returns cached float32 pixel coordinate grids for cv2.remap."""
+    key = ("mesh", shape)
+    if key not in _dis_cache:
+        h, w = shape
+        _dis_cache[key] = np.meshgrid(
+            np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32)
+        )
+    return _dis_cache[key]
+
+
+def _median5(a, b, c, d, e) -> np.ndarray:
+    """Element-wise median of five arrays using a min/max sorting network."""
+    a, b = cv2.min(a, b), cv2.max(a, b)
+    c, d = cv2.min(c, d), cv2.max(c, d)
+    a, c = cv2.min(a, c), cv2.max(a, c)
+    b, d = cv2.min(b, d), cv2.max(b, d)
+    # a is the minimum and d the maximum of the first four, so the median of
+    # all five is the median of b, c and e.
+    b, c = cv2.min(b, c), cv2.max(b, c)
+    return cv2.max(b, cv2.min(c, e))
+
+
+def _particle_mask(
+    mask: np.ndarray, frame: np.ndarray, max_area: int, max_sat: int, grow: int
+) -> np.ndarray:
+    """
+    Keeps only candidate pixels that look like particles: saturation at most
+    max_sat and part of a connected component no larger than max_area pixels.
+    The result is dilated by grow pixels to cover particle fringes.
+    """
+    sat = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)[..., 1]
+    mask = cv2.bitwise_and(mask, cv2.threshold(sat, max_sat, 255, cv2.THRESH_BINARY_INV)[1])
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if n <= 1:
+        return mask
+    keep = (stats[:, cv2.CC_STAT_AREA] <= max_area).astype(np.uint8) * 255
+    keep[0] = 0
+    out = np.take(keep, labels)
+    if grow > 0:
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * grow + 1, 2 * grow + 1))
+        out = cv2.dilate(out, k)
+    return out
+
+
+def _feather_blend(
+    frame: np.ndarray, fill: np.ndarray, mask: np.ndarray, feather: int
+) -> np.ndarray:
+    """Blends fill into frame under a Gaussian-softened binary mask."""
+    if feather > 1:
+        k = feather | 1
+        mask = cv2.GaussianBlur(mask, (k, k), 0)
+    w = mask.astype(np.float32) * (1.0 / 255.0)
+    return cv2.blendLinear(frame, fill, 1.0 - w, w)
+
+
+@window_op(size=5)
+def remove_particles(
+    frames: list,
+    centre: int,
+    tophat_size: int = 21,
+    tophat_thresh: int = 25,
+    temporal_thresh: int = 20,
+    max_area: int = 2500,
+    max_sat: int = 90,
+    fill: str = "median",
+    feather: int = 7,
+    grow: int = 2,
+    dis_preset: int = cv2.DISOPTICAL_FLOW_PRESET_ULTRAFAST,
+) -> np.ndarray:
+    """
+    Removes bright drifting particles (marine snow, dust, bubbles) from the
+    centre frame using its motion-compensated neighbours.
+
+    Neighbouring frames are warped onto the centre with DIS optical flow. A
+    pixel is treated as a particle when it is a small bright spot (white
+    top-hat) or brighter than the temporal median of the warped window
+    (transient). Candidate
+    regions larger than max_area or more saturated than max_sat are kept as
+    scene content. Masked pixels are replaced by the temporal median (or
+    minimum) of the warped window. The window is 5 frames wide, so output lags
+    input by two frames.
+
+    Args:
+        tophat_size: Structuring element diameter; spots smaller than this are candidates.
+        tophat_thresh: Minimum top-hat response (grey levels) for the spatial cue.
+        temporal_thresh: Minimum excess brightness over the temporal median.
+        max_area: Largest component area (px) still considered a particle.
+        max_sat: Largest mean HSV saturation still considered a particle.
+        fill: "median", "min" or "inpaint" for the replacement source.
+        feather: Blur kernel for the mask edge; 0 or 1 disables.
+        grow: Mask dilation radius in pixels.
+        dis_preset: cv2.DISOPTICAL_FLOW_PRESET_* controlling flow quality vs speed.
+    """
+    ref = frames[centre]
+    grey = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for f in frames]
+    # Flow is estimated on lightly filtered greys so particles do not steer it.
+    flow_src = [cv2.blur(g, (5, 5)) for g in grey]
+    gx, gy = _mesh(grey[centre].shape)
+    dis = _dis_flow(dis_preset)
+
+    warped, warped_grey = [], []
+    for i, f in enumerate(frames):
+        if i == centre:
+            continue
+        flow = dis.calc(flow_src[centre], flow_src[i], None)
+        mx, my = gx + flow[..., 0], gy + flow[..., 1]
+        warped.append(cv2.remap(f, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE))
+        warped_grey.append(
+            cv2.remap(grey[i], mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        )
+
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (tophat_size, tophat_size))
+    tophat = cv2.morphologyEx(grey[centre], cv2.MORPH_TOPHAT, k)
+    spatial = cv2.threshold(tophat, tophat_thresh, 255, cv2.THRESH_BINARY)[1]
+
+    # Median-frame subtraction: a pixel that is brighter than the temporal
+    # median is transient even when one neighbour duplicates the centre.
+    grey_med = _median5(warped_grey[0], warped_grey[1], grey[centre], warped_grey[2], warped_grey[3])
+    excess = cv2.subtract(grey[centre], grey_med)
+    temporal = cv2.threshold(excess, temporal_thresh, 255, cv2.THRESH_BINARY)[1]
+
+    mask = _particle_mask(cv2.bitwise_or(spatial, temporal), ref, max_area, max_sat, grow)
+    if not mask.any():
+        return ref
+
+    if fill == "median":
+        src = _median5(warped[0], warped[1], ref, warped[2], warped[3])
+    elif fill == "min":
+        src = warped[0]
+        for w in warped[1:]:
+            src = cv2.min(src, w)
+    elif fill == "inpaint":
+        src = cv2.inpaint(ref, mask, 3, cv2.INPAINT_TELEA)
+    else:
+        raise ValueError(f"unknown fill {fill!r}; expected 'median', 'min' or 'inpaint'")
+
+    return _feather_blend(ref, src, mask, feather)
+
+
+@frame_op
+def remove_specks(
+    frame: np.ndarray,
+    size: int = 15,
+    thresh: int = 25,
+    max_area: int = 600,
+    max_sat: int = 90,
+    feather: int = 5,
+    grow: int = 2,
+) -> np.ndarray:
+    """
+    Removes small bright specks from a single frame.
+
+    Detects spots brighter than their surroundings and smaller than size via a
+    white top-hat, discards candidates that are too large or too saturated to
+    be particles, and replaces the rest with the morphological opening of the
+    frame. Spatial only: particles larger than size are left untouched.
+
+    Args:
+        size: Structuring element diameter; spots smaller than this are candidates.
+        thresh: Minimum top-hat response (grey levels).
+        max_area: Largest component area (px) still considered a speck.
+        max_sat: Largest mean HSV saturation still considered a speck.
+        feather: Blur kernel for the mask edge; 0 or 1 disables.
+        grow: Mask dilation radius in pixels.
+    """
+    grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (size, size))
+    tophat = cv2.morphologyEx(grey, cv2.MORPH_TOPHAT, k)
+    cand = cv2.threshold(tophat, thresh, 255, cv2.THRESH_BINARY)[1]
+    mask = _particle_mask(cand, frame, max_area, max_sat, grow)
+    if not mask.any():
+        return frame
+    opened = cv2.morphologyEx(frame, cv2.MORPH_OPEN, k)
+    return _feather_blend(frame, opened, mask, feather)
+
+
 @frame_op
 def satboost(frame: np.ndarray, alpha=1.1, thresh=0.5) -> np.ndarray:
     h, s, v = cv2.split(cv2.cvtColor(frame, cv2.COLOR_RGB2HSV))
